@@ -319,6 +319,24 @@ const inputStyle = {
 };
 function TextInput(props) { return <input {...props} style={{ ...inputStyle, ...(props.style || {}) }} />; }
 function TextArea(props) { return <textarea {...props} style={{ ...inputStyle, resize: "vertical", minHeight: 70, ...(props.style || {}) }} />; }
+function AutoTextArea(props) {
+  const ref = useRef(null);
+  const ajustarAltura = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  useEffect(() => { ajustarAltura(); }, [props.value]);
+  return (
+    <textarea
+      {...props}
+      ref={ref}
+      onInput={ajustarAltura}
+      style={{ ...inputStyle, resize: "vertical", minHeight: 160, overflow: "hidden", lineHeight: 1.5, ...(props.style || {}) }}
+    />
+  );
+}
 function Select(props) { return <select {...props} style={{ ...inputStyle, ...(props.style || {}) }}>{props.children}</select>; }
 
 function PrimaryButton({ children, onClick, style, disabled }) {
@@ -698,9 +716,25 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando })
               {legendas[b.nivel] && <div style={{ fontSize: 11, color: "#71727A", marginTop: 5 }}>{legendas[b.nivel]}</div>}
             </Field>
             <Field label="Formato">
-              <Select value={b.formato} onChange={(e) => atualizarBloco(b.id, "formato", e.target.value)}>
+              <Select
+                value={FORMATOS.includes(b.formato) ? b.formato : "Outro..."}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  atualizarBloco(b.id, "formato", v === "Outro..." ? "" : v);
+                }}
+              >
                 {FORMATOS.map((f) => <option key={f} value={f}>{f}</option>)}
+                <option value="Outro...">Outro...</option>
               </Select>
+              {!FORMATOS.includes(b.formato) && (
+                <TextInput
+                  value={b.formato}
+                  onChange={(e) => atualizarBloco(b.id, "formato", e.target.value)}
+                  placeholder="Digite o formato (ex: CHIPPER)"
+                  style={{ marginTop: 6 }}
+                  autoFocus
+                />
+              )}
             </Field>
           </div>
           <Field label="Requisitos p/ esse workout">
@@ -710,7 +744,7 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando })
             <TextArea value={b.objetivos} onChange={(e) => atualizarBloco(b.id, "objetivos", e.target.value)} placeholder="O que esse bloco desenvolve..." />
           </Field>
           <Field label="Conteúdo (movimentos, reps, tempo)">
-            <TextArea value={b.conteudo} onChange={(e) => atualizarBloco(b.id, "conteudo", e.target.value)} placeholder={"Ex: 21-15-9\nThrusters\nPull-ups"} />
+            <AutoTextArea value={b.conteudo} onChange={(e) => atualizarBloco(b.id, "conteudo", e.target.value)} placeholder={"Ex: 21-15-9\nThrusters\nPull-ups"} />
           </Field>
         </div>
       ))}
