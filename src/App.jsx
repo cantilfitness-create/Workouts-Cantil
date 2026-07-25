@@ -345,12 +345,43 @@ function GhostButton({ children, onClick, style }) {
   );
 }
 function Sheet({ title, onClose, children }) {
+  const [alturaVisivel, setAlturaVisivel] = useState(
+    typeof window !== "undefined" ? window.innerHeight : 800
+  );
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const atualizar = () => setAlturaVisivel(vv.height);
+    atualizar();
+    vv.addEventListener("resize", atualizar);
+    vv.addEventListener("scroll", atualizar);
+    return () => {
+      vv.removeEventListener("resize", atualizar);
+      vv.removeEventListener("scroll", atualizar);
+    };
+  }, []);
+
+  const rolarCampoParaVisivel = (e) => {
+    const alvo = e.target;
+    setTimeout(() => {
+      if (alvo && alvo.scrollIntoView) {
+        alvo.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }, 300);
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 50, display: "flex", alignItems: "flex-end" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{
-        background: "#212226", width: "100%", maxWidth: 640, margin: "0 auto", maxHeight: "88vh", overflowY: "auto",
-        borderRadius: "16px 16px 0 0", padding: "18px 16px 28px", borderTop: "3px solid #E4DE00",
-      }}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        onFocus={rolarCampoParaVisivel}
+        style={{
+          background: "#212226", width: "100%", maxWidth: 640, margin: "0 auto",
+          maxHeight: Math.round(alturaVisivel * 0.92), overflowY: "auto",
+          borderRadius: "16px 16px 0 0", padding: "18px 16px 28px", borderTop: "3px solid #E4DE00",
+        }}
+      >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.04em" }}>{title}</span>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#9A9A94", cursor: "pointer" }}><X size={22} /></button>
