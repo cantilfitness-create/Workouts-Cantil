@@ -3,8 +3,9 @@ import {
   Dumbbell, ListChecks, ClipboardList, Plus, X, Search,
   ChevronDown, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Flag, Target, Zap, Share2, Check, ArrowLeft, LogOut,
-  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star
+  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, TrendingUp
 } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase } from "./supabaseClient.js";
 
 /* ---------------------------------------------------------
@@ -78,6 +79,55 @@ function formatarDataHora(iso) {
   } catch {
     return "";
   }
+}
+
+// Tenta ler o campo "resultado" (texto livre) como tempo (mm:ss) ou como pontuação (número).
+function parseResultado(resultado) {
+  if (!resultado) return null;
+  const str = resultado.trim();
+  const m = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (m) {
+    const partes = [m[1], m[2], m[3]].filter(Boolean).map(Number);
+    let segundos;
+    if (partes.length === 3) segundos = partes[0] * 3600 + partes[1] * 60 + partes[2];
+    else segundos = partes[0] * 60 + partes[1];
+    return { valor: segundos, ehTempo: true };
+  }
+  const n = str.match(/\d+(\.\d+)?/);
+  if (n) return { valor: parseFloat(n[0]), ehTempo: false };
+  return null;
+}
+
+function formatarSegundos(s) {
+  const total = Math.round(s);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+// Agrupa os registros do atleta por treino (mesmo nome + mesmo bloco) pra montar o progresso.
+function agruparProgresso(logs) {
+  const grupos = {};
+  logs.forEach((l) => {
+    const parsed = parseResultado(l.resultado);
+    if (!parsed) return;
+    const chave = `${(l.workoutNome || "").trim().toLowerCase()}|${(l.blocoNome || "").trim().toLowerCase()}`;
+    if (!grupos[chave]) {
+      grupos[chave] = { nome: l.workoutNome || "Treino livre", blocoNome: l.blocoNome || "", ehTempo: parsed.ehTempo, itens: [] };
+    }
+    grupos[chave].itens.push({ data: l.data, valor: parsed.valor, resultado: l.resultado });
+  });
+  return Object.values(grupos)
+    .filter((g) => g.itens.length >= 2)
+    .map((g) => {
+      const ordenado = [...g.itens].sort((a, b) => (a.data < b.data ? -1 : 1));
+      const valores = ordenado.map((i) => i.valor);
+      const melhor = g.ehTempo ? Math.min(...valores) : Math.max(...valores);
+      const pior = g.ehTempo ? Math.max(...valores) : Math.min(...valores);
+      return { ...g, itens: ordenado, melhor, pior };
+    });
 }
 
 /* ---------------------------- mapeamento banco <-> app ---------------------------- */
@@ -166,6 +216,15 @@ async function fetchWorkoutsPage(offset) {
     .order("data", { ascending: false })
     .order("criado_em", { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1);
+  if (error) { console.error(error); return { rows: [], total: 0 }; }
+  return { rows: data.map(workoutFromDb), total: count || 0 };
+}
+async function fetchWorkoutsRecentes(limite = 6) {
+  const { data, error, count } = await supabase
+    .from("workouts")
+    .select("*", { count: "exact" })
+    .order("atualizado_em", { ascending: false })
+    .limit(limite);
   if (error) { console.error(error); return { rows: [], total: 0 }; }
   return { rows: data.map(workoutFromDb), total: count || 0 };
 }
@@ -817,7 +876,11 @@ function WorkoutDetalhes({ w, legendas = {} }) {
 function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onToggle, legendas, destaque }) {
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
-    <div style={{ background: "#212226", border: destaque ? "1px solid #E4DE00" : "1px solid #2E2F34", borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
+    <div style={{
+      background: destaque ? "linear-gradient(135deg, rgba(228,222,0,0.10), rgba(228,222,0,0.02))" : "#1A1B1E",
+      border: destaque ? "1px solid rgba(228,222,0,0.5)" : "1px solid #26272B",
+      borderRadius: 12, marginBottom: 10, overflow: "hidden",
+    }}>
       <div style={{ padding: "14px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={onToggle}>
         <div>
           {destaque && (
@@ -825,8 +888,8 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onTogg
               <Star size={11} fill="#E4DE00" /> Destaque
             </div>
           )}
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#F1EFE9", letterSpacing: "0.03em", textTransform: "uppercase" }}>{w.nome || "Treino sem nome"}</div>
-          <div style={{ fontSize: 12, color: "#71727A", marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: destaque ? "#FFFFFF" : "#D8D8D3", letterSpacing: "0.03em", textTransform: "uppercase" }}>{w.nome || "Treino sem nome"}</div>
+          <div style={{ fontSize: 12, color: "#6B6C72", marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span>{w.data}</span>
             {w.codigo && <Badge>#{w.codigo}</Badge>}
             {w.categoria && <Badge>{w.categoria}</Badge>}
@@ -1054,18 +1117,34 @@ function BannerDestaque({ banner, setBanner, senha }) {
 }
 
 function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId }) {
+  const [recentes, setRecentes] = useState([]);
+  const [carregandoRecentes, setCarregandoRecentes] = useState(true);
+  const [totalGeral, setTotalGeral] = useState(0);
+
+  const [modoTodos, setModoTodos] = useState(false);
   const [workouts, setWorkouts] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [carregandoMais, setCarregandoMais] = useState(false);
   const [total, setTotal] = useState(0);
   const [busca, setBusca] = useState("");
   const [buscando, setBuscando] = useState(false);
+
   const [sheetAberto, setSheetAberto] = useState(false);
   const [editando, setEditando] = useState(null);
   const [salvandoTreino, setSalvandoTreino] = useState(false);
   const [expandidoId, setExpandidoId] = useState(null);
   const debounceRef = useRef(null);
   const { pedir, Modal } = useSenhaGate(senha);
+
+  const carregarRecentes = useCallback(async () => {
+    setCarregandoRecentes(true);
+    const { rows, total: t } = await fetchWorkoutsRecentes(6);
+    setRecentes(rows);
+    setTotalGeral(t);
+    setCarregandoRecentes(false);
+  }, []);
+
+  useEffect(() => { carregarRecentes(); }, [carregarRecentes]);
 
   const carregarPrimeiraPagina = useCallback(async () => {
     setCarregando(true);
@@ -1075,9 +1154,8 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setCarregando(false);
   }, []);
 
-  useEffect(() => { carregarPrimeiraPagina(); }, [carregarPrimeiraPagina]);
-
   useEffect(() => {
+    if (!modoTodos) return;
     clearTimeout(debounceRef.current);
     if (!busca.trim()) { carregarPrimeiraPagina(); return; }
     setBuscando(true);
@@ -1088,7 +1166,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     }, 350);
     return () => clearTimeout(debounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busca]);
+  }, [busca, modoTodos]);
 
   const carregarMais = async () => {
     setCarregandoMais(true);
@@ -1099,6 +1177,16 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
 
   const abrirNovoTreino = () => pedir(() => { setEditando(null); setSheetAberto(true); });
   const abrirEdicaoTreino = (w) => pedir(() => { setEditando(w.id); setSheetAberto(true); });
+  const abrirTodos = () => pedir(() => { setModoTodos(true); carregarPrimeiraPagina(); });
+  const voltarRecentes = () => { setModoTodos(false); setBusca(""); };
+
+  const recarregarTudo = async () => {
+    await carregarRecentes();
+    if (modoTodos) {
+      if (busca.trim()) { const rows = await searchWorkoutsDb(busca.trim()); setWorkouts(rows); }
+      else { await carregarPrimeiraPagina(); }
+    }
+  };
 
   const salvar = async (form) => {
     if (salvandoTreino) return;
@@ -1111,13 +1199,14 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setSalvandoTreino(false);
     setSheetAberto(false);
     setEditando(null);
-    if (busca.trim()) { const rows = await searchWorkoutsDb(busca.trim()); setWorkouts(rows); }
-    else { carregarPrimeiraPagina(); }
+    await recarregarTudo();
   };
 
   const excluir = (id) => pedir(async () => {
     await excluirWorkoutDb(id);
     setWorkouts((prev) => prev.filter((w) => w.id !== id));
+    setRecentes((prev) => prev.filter((w) => w.id !== id));
+    setTotalGeral((prev) => Math.max(0, prev - 1));
   });
 
   const compartilhar = async (w) => {
@@ -1125,11 +1214,17 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     onToast(ok ? "Link do treino copiado!" : "Não consegui copiar o link");
   };
 
+  const listaExibida = modoTodos ? workouts : recentes;
+  const carregandoLista = modoTodos ? carregando : carregandoRecentes;
+  const treinoEmEdicao = modoTodos
+    ? workouts.find((w) => w.id === editando)
+    : recentes.find((w) => w.id === editando);
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <div style={{ fontSize: 12, color: "#71727A", display: "flex", alignItems: "center", gap: 5 }}>
-          <Users size={13} /> Visível para todos {total > 0 && `· ${total} treinos`}
+          <Users size={13} /> Visível para todos {totalGeral > 0 && `· ${totalGeral} treinos`}
         </div>
         <PrimaryButton onClick={abrirNovoTreino}><Plus size={15} /> Novo treino</PrimaryButton>
       </div>
@@ -1137,19 +1232,30 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
 
       <LegendaNiveis legendas={legendas} setLegendas={setLegendas} senha={senha} />
 
-      <div style={{ position: "relative", marginBottom: 14 }}>
-        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
-        <TextInput placeholder="Buscar por nome, código, categoria ou tag..." value={busca} onChange={(e) => setBusca(e.target.value)} style={{ paddingLeft: 32 }} />
-      </div>
+      {modoTodos ? (
+        <>
+          <GhostButton onClick={voltarRecentes} style={{ marginBottom: 14 }}>
+            <ArrowLeft size={14} /> Voltar aos recentes
+          </GhostButton>
+          <div style={{ position: "relative", marginBottom: 14 }}>
+            <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
+            <TextInput placeholder="Buscar por nome, código, categoria ou tag..." value={busca} onChange={(e) => setBusca(e.target.value)} style={{ paddingLeft: 32 }} />
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 11.5, color: "#5f6066", marginBottom: 12 }}>
+          Mostrando os {Math.min(6, totalGeral)} treinos mais recentes
+        </div>
+      )}
 
-      {carregando ? (
+      {carregandoLista ? (
         <Spinner label="Carregando treinos..." />
       ) : (
         <>
-          {workouts.length === 0 && (
+          {listaExibida.length === 0 && (
             <EmptyState text={busca.trim() ? "Nenhum treino encontrado para essa busca." : "Nenhum treino programado ainda. Toque em 'Novo treino'."} />
           )}
-          {workouts.map((w) => (
+          {listaExibida.map((w) => (
             <WorkoutCard
               key={w.id} w={w} expandido={expandidoId === w.id}
               onToggle={() => setExpandidoId(expandidoId === w.id ? null : w.id)}
@@ -1158,9 +1264,14 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               destaque={w.id === bannerWorkoutId}
             />
           ))}
-          {!busca.trim() && workouts.length < total && (
+          {modoTodos && !busca.trim() && workouts.length < total && (
             <GhostButton onClick={carregarMais} style={{ width: "100%" }}>
               {carregandoMais ? "Carregando..." : `Carregar mais (${workouts.length}/${total})`}
+            </GhostButton>
+          )}
+          {!modoTodos && totalGeral > 6 && (
+            <GhostButton onClick={abrirTodos} style={{ width: "100%" }}>
+              <Lock size={14} /> Ver todos os treinos ({totalGeral})
             </GhostButton>
           )}
           {buscando && <div style={{ fontSize: 12, color: "#71727A", textAlign: "center", marginTop: 8 }}>Buscando...</div>}
@@ -1172,7 +1283,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       {sheetAberto && (
         <Sheet title={editando ? "Editar treino" : "Novo treino"} onClose={() => { setSheetAberto(false); setEditando(null); }}>
           <WorkoutForm
-            inicial={editando ? workouts.find((w) => w.id === editando) : null}
+            inicial={editando ? treinoEmEdicao : null}
             onSalvar={salvar}
             onCancelar={() => { setSheetAberto(false); setEditando(null); }}
             legendas={legendas}
@@ -1187,6 +1298,73 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
 /* =================================================================
    LOG PESSOAL (execução + ajustes)
 ================================================================= */
+
+function ProgressoTreinos({ logs }) {
+  const grupos = agruparProgresso(logs);
+  if (grupos.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{
+        fontFamily: "'Anton', sans-serif", fontSize: 14, color: "#F1EFE9", textTransform: "uppercase",
+        marginBottom: 10, letterSpacing: "0.04em", display: "flex", alignItems: "center", gap: 7,
+      }}>
+        <TrendingUp size={15} color="#E4DE00" /> Seu progresso
+      </div>
+
+      {grupos.map((g) => (
+        <div key={`${g.nome}|${g.blocoNome}`} style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 12, padding: 14, marginBottom: 10 }}>
+          <div style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>
+            {g.nome}{g.blocoNome && ` — ${g.blocoNome}`}
+          </div>
+          <div style={{ fontSize: 11, color: "#71727A", marginBottom: 12 }}>
+            {g.ehTempo ? "Tempo — menor é melhor" : "Pontuação — maior é melhor"} · {g.itens.length} registros
+          </div>
+
+          <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 10.5, color: "#71727A", textTransform: "uppercase", letterSpacing: "0.04em" }}>Melhor</div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 17, color: "#4CAF6D", fontWeight: 700 }}>
+                {g.ehTempo ? formatarSegundos(g.melhor) : g.melhor}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10.5, color: "#71727A", textTransform: "uppercase", letterSpacing: "0.04em" }}>Pior</div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 17, color: "#E6483F", fontWeight: 700 }}>
+                {g.ehTempo ? formatarSegundos(g.pior) : g.pior}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ width: "100%", height: 140 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={g.itens} margin={{ top: 5, right: 8, left: -18, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#26272B" />
+                <XAxis dataKey="data" tick={{ fontSize: 10, fill: "#71727A" }} />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "#71727A" }}
+                  reversed={g.ehTempo}
+                  domain={["auto", "auto"]}
+                  tickFormatter={(v) => (g.ehTempo ? formatarSegundos(v) : v)}
+                  width={46}
+                />
+                <Tooltip
+                  contentStyle={{ background: "#212226", border: "1px solid #3A3B40", borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: "#F1EFE9" }}
+                  formatter={(v) => [g.ehTempo ? formatarSegundos(v) : v, "Resultado"]}
+                />
+                <Line type="monotone" dataKey="valor" stroke="#E4DE00" strokeWidth={2} dot={{ r: 3, fill: "#E4DE00" }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={{ fontSize: 10.5, color: "#5f6066", marginTop: 4, textAlign: "center" }}>
+            (linha subindo = evolução, mesmo em treinos por tempo)
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function LogTab({ legendas }) {
   const [atleta, setAtletaState] = useState(() => localStorage.getItem("cantil_atleta_nome") || "");
@@ -1284,6 +1462,7 @@ function LogTab({ legendas }) {
 
       {carregando ? <Spinner label="Carregando seu log..." /> : (
         <>
+          <ProgressoTreinos logs={logs} />
           {logs.length === 0 && <EmptyState text="Nenhum registro ainda. Registre seu resultado e eventuais ajustes/adaptações do treino." />}
           {logs.map((l) => (
             <div key={l.id} style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 10, padding: 14, marginBottom: 10 }}>
