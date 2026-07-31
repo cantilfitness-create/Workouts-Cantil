@@ -81,21 +81,42 @@ function formatarDataHora(iso) {
   }
 }
 
-// Tenta ler o campo "resultado" (texto livre) como tempo (mm:ss) ou como pontuação (número).
+// Tenta ler o campo "resultado" (texto livre) como tempo, peso ou rounds/reps.
 function parseResultado(resultado) {
   if (!resultado) return null;
   const str = resultado.trim();
-  const m = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-  if (m) {
-    const partes = [m[1], m[2], m[3]].filter(Boolean).map(Number);
+
+  const pesoMatch = str.match(/(\d+(?:[.,]\d+)?)\s*(kg|lbs?|libras?)\b/i);
+  if (pesoMatch) {
+    return { valor: parseFloat(pesoMatch[1].replace(",", ".")), tipo: "peso" };
+  }
+
+  const tempoMatch = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (tempoMatch) {
+    const partes = [tempoMatch[1], tempoMatch[2], tempoMatch[3]].filter(Boolean).map(Number);
     let segundos;
     if (partes.length === 3) segundos = partes[0] * 3600 + partes[1] * 60 + partes[2];
     else segundos = partes[0] * 60 + partes[1];
-    return { valor: segundos, ehTempo: true };
+    return { valor: segundos, tipo: "tempo" };
   }
+
   const n = str.match(/\d+(\.\d+)?/);
-  if (n) return { valor: parseFloat(n[0]), ehTempo: false };
+  if (n) return { valor: parseFloat(n[0]), tipo: "rounds" };
   return null;
+}
+
+const menorEhMelhor = (tipo) => tipo === "tempo";
+
+function rotuloTipo(tipo) {
+  if (tipo === "tempo") return "Tempo — menor é sempre melhor";
+  if (tipo === "peso") return "Peso — maior é sempre melhor";
+  return "Rounds/Reps — maior é sempre melhor";
+}
+
+function formatarValor(tipo, valor) {
+  if (tipo === "tempo") return formatarSegundos(valor);
+  if (tipo === "peso") return `${valor} kg`;
+  return `${valor}`;
 }
 
 function formatarSegundos(s) {
@@ -115,7 +136,7 @@ function agruparProgresso(logs) {
     if (!parsed) return;
     const chave = `${(l.workoutNome || "").trim().toLowerCase()}|${(l.blocoNome || "").trim().toLowerCase()}`;
     if (!grupos[chave]) {
-      grupos[chave] = { nome: l.workoutNome || "Treino livre", blocoNome: l.blocoNome || "", ehTempo: parsed.ehTempo, itens: [] };
+      grupos[chave] = { nome: l.workoutNome || "Treino livre", blocoNome: l.blocoNome || "", tipo: parsed.tipo, itens: [] };
     }
     grupos[chave].itens.push({ data: l.data, valor: parsed.valor, resultado: l.resultado });
   });
@@ -124,9 +145,35 @@ function agruparProgresso(logs) {
     .map((g) => {
       const ordenado = [...g.itens].sort((a, b) => (a.data < b.data ? -1 : 1));
       const valores = ordenado.map((i) => i.valor);
-      const melhor = g.ehTempo ? Math.min(...valores) : Math.max(...valores);
-      const pior = g.ehTempo ? Math.max(...valores) : Math.min(...valores);
+      const menorMelhor = menorEhMelhor(g.tipo);
+      const melhor = menorMelhor ? Math.min(...valores) : Math.max(...valores);
+      const pior = menorMelhor ? Math.max(...valores) : Math.min(...valores);
       return { ...g, itens: ordenado, melhor, pior };
+    });
+}
+
+// Compara TODOS os alunos num mesmo treino/bloco (turma inteira) — usado no comparativo da turma.
+async function fetchComparativoTurma(workoutId) {
+  const { data, error } = await supabase.from("logs").select("*").eq("workout_id", workoutId);
+  if (error) { console.error(error); return []; }
+  const porBloco = {};
+  data.forEach((r) => {
+    const l = logFromDb(r);
+    const parsed = parseResultado(l.resultado);
+    if (!parsed) return;
+    const chave = (l.blocoNome || "").trim().toLowerCase();
+    if (!porBloco[chave]) porBloco[chave] = { blocoNome: l.blocoNome || "", tipo: parsed.tipo, itens: [] };
+    porBloco[chave].itens.push({ atleta: l.atleta, valor: parsed.valor, resultado: l.resultado });
+  });
+  return Object.values(porBloco)
+    .filter((g) => g.itens.length >= 2)
+    .map((g) => {
+      const menorMelhor = menorEhMelhor(g.tipo);
+      const ordenado = [...g.itens].sort((a, b) => (menorMelhor ? a.valor - b.valor : b.valor - a.valor));
+      const melhorItem = ordenado[0];
+      const piorItem = ordenado[ordenado.length - 1];
+      const distancia = Math.abs(melhorItem.valor - piorItem.valor);
+      return { ...g, ordenado, melhorItem, piorItem, distancia };
     });
 }
 
@@ -392,7 +439,7 @@ function AutoTextArea(props) {
       {...props}
       ref={ref}
       onInput={ajustarAltura}
-      style={{ ...inputStyle, resize: "vertical", minHeight: 160, overflow: "hidden", lineHeight: 1.5, ...(props.style || {}) }}
+      style={{ ...inputStyle, resize: "vertical", minHeight: 88, overflow: "hidden", lineHeight: 1.5, ...(props.style || {}) }}
     />
   );
 }
@@ -694,7 +741,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
             <TextInput value={form.equipamento} onChange={(e) => setForm({ ...form, equipamento: e.target.value })} placeholder="Ex: Barra, anilhas" />
           </Field>
           <Field label="Descrição / técnica">
-            <TextArea value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Pontos-chave de execução..." />
+            <AutoTextArea value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Pontos-chave de execução..." />
           </Field>
           <Field label="Link de demonstração (vídeo)">
             <TextInput type="url" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="Cole o link do vídeo (YouTube, Instagram...)" />
@@ -745,13 +792,13 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando })
       </Field>
 
       <Field label="G-WARM UP (geral)">
-        <TextArea value={form.warmupGeral} onChange={(e) => setForm({ ...form, warmupGeral: e.target.value })} placeholder="Aquecimento geral..." />
+        <AutoTextArea value={form.warmupGeral} onChange={(e) => setForm({ ...form, warmupGeral: e.target.value })} placeholder="Aquecimento geral..." />
       </Field>
       <Field label="E-WARM UP (específico)">
-        <TextArea value={form.warmupEspecifico} onChange={(e) => setForm({ ...form, warmupEspecifico: e.target.value })} placeholder="Aquecimento específico do movimento..." />
+        <AutoTextArea value={form.warmupEspecifico} onChange={(e) => setForm({ ...form, warmupEspecifico: e.target.value })} placeholder="Aquecimento específico do movimento..." />
       </Field>
       <Field label="Skill">
-        <TextArea value={form.skill} onChange={(e) => setForm({ ...form, skill: e.target.value })} placeholder="Trabalho de habilidade/técnica..." />
+        <AutoTextArea value={form.skill} onChange={(e) => setForm({ ...form, skill: e.target.value })} placeholder="Trabalho de habilidade/técnica..." />
       </Field>
 
       <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 14, color: "#F1EFE9", textTransform: "uppercase", margin: "18px 0 8px", letterSpacing: "0.04em" }}>
@@ -797,13 +844,13 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando })
             </Field>
           </div>
           <Field label="Requisitos p/ esse workout">
-            <TextArea value={b.requisitos} onChange={(e) => atualizarBloco(b.id, "requisitos", e.target.value)} placeholder="Pré-requisitos técnicos, peso mínimo, mobilidade..." />
+            <AutoTextArea value={b.requisitos} onChange={(e) => atualizarBloco(b.id, "requisitos", e.target.value)} placeholder="Pré-requisitos técnicos, peso mínimo, mobilidade..." />
           </Field>
           <Field label="Objetivos">
-            <TextArea value={b.objetivos} onChange={(e) => atualizarBloco(b.id, "objetivos", e.target.value)} placeholder="O que esse bloco desenvolve..." />
+            <AutoTextArea value={b.objetivos} onChange={(e) => atualizarBloco(b.id, "objetivos", e.target.value)} placeholder="O que esse bloco desenvolve..." />
           </Field>
           <Field label="Conteúdo (movimentos, reps, tempo)">
-            <AutoTextArea value={b.conteudo} onChange={(e) => atualizarBloco(b.id, "conteudo", e.target.value)} placeholder={"Ex: 21-15-9\nThrusters\nPull-ups"} />
+            <AutoTextArea value={b.conteudo} onChange={(e) => atualizarBloco(b.id, "conteudo", e.target.value)} placeholder={"Ex: 21-15-9\nThrusters\nPull-ups"} style={{ minHeight: 160 }} />
           </Field>
         </div>
       ))}
@@ -873,7 +920,73 @@ function WorkoutDetalhes({ w, legendas = {} }) {
   );
 }
 
-function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onToggle, legendas, destaque }) {
+function ComparativoTurma({ workoutId, senha }) {
+  const { pedir, Modal } = useSenhaGate(senha);
+  const [mostrando, setMostrando] = useState(false);
+  const [carregando, setCarregando] = useState(false);
+  const [grupos, setGrupos] = useState(null);
+
+  const abrir = () => pedir(async () => {
+    setMostrando(true);
+    setCarregando(true);
+    const rows = await fetchComparativoTurma(workoutId);
+    setGrupos(rows);
+    setCarregando(false);
+  });
+
+  if (!mostrando) {
+    return (
+      <GhostButton onClick={abrir} style={{ width: "100%", marginTop: 14 }}>
+        <Lock size={14} /> Ver comparativo da turma
+      </GhostButton>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: "#71727A", marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}>
+        <Users size={12} /> Comparativo entre todos que registraram esse treino
+      </div>
+      {carregando ? (
+        <Spinner label="Calculando..." />
+      ) : grupos && grupos.length > 0 ? (
+        grupos.map((g) => (
+          <div key={g.blocoNome} style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 10, padding: 12, marginBottom: 8 }}>
+            {g.blocoNome && <div style={{ fontSize: 12, fontWeight: 700, color: "#F1EFE9", marginBottom: 6 }}>{g.blocoNome}</div>}
+            <div style={{ fontSize: 10.5, color: "#71727A", marginBottom: 8 }}>{rotuloTipo(g.tipo)} · {g.itens.length} alunos</div>
+            <div style={{ display: "flex", gap: 20, marginBottom: 8 }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#71727A", textTransform: "uppercase" }}>Melhor</div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, color: "#4CAF6D", fontWeight: 700 }}>
+                  {formatarValor(g.tipo, g.melhorItem.valor)}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#B9BABF" }}>{g.melhorItem.atleta}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#71727A", textTransform: "uppercase" }}>Pior</div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, color: "#E6483F", fontWeight: 700 }}>
+                  {formatarValor(g.tipo, g.piorItem.valor)}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#B9BABF" }}>{g.piorItem.atleta}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#71727A", textTransform: "uppercase" }}>Distância</div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, color: "#E4DE00", fontWeight: 700 }}>
+                  {formatarValor(g.tipo, g.distancia)}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))
+      ) : (
+        <EmptyState text="Ainda não há pelo menos 2 alunos com resultado registrado nesse treino." />
+      )}
+      {Modal}
+    </div>
+  );
+}
+
+function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onToggle, legendas, destaque, senha }) {
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
     <div style={{
@@ -910,6 +1023,7 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onTogg
             <GhostButton onClick={() => onEditar(w)} style={{ flex: 1 }}><Pencil size={14} /> Editar</GhostButton>
             <GhostButton onClick={() => onExcluir(w.id)} style={{ flex: 1 }}><Trash2 size={14} /> Excluir</GhostButton>
           </div>
+          <ComparativoTurma workoutId={w.id} senha={senha} />
         </div>
       )}
     </div>
@@ -1083,7 +1197,7 @@ function BannerDestaque({ banner, setBanner, senha }) {
                 <TextInput value={form.titulo || ""} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder="Ex: Box fechada no feriado" />
               </Field>
               <Field label="Descrição">
-                <TextArea value={form.descricao || ""} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Detalhes do aviso..." />
+                <AutoTextArea value={form.descricao || ""} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Detalhes do aviso..." />
               </Field>
             </>
           ) : (
@@ -1097,7 +1211,7 @@ function BannerDestaque({ banner, setBanner, senha }) {
                 </Select>
               </Field>
               <Field label="Observação (opcional)">
-                <TextArea value={form.observacao || ""} onChange={(e) => setForm({ ...form, observacao: e.target.value })} placeholder="Ex: bora treinar pesado hoje!" />
+                <AutoTextArea value={form.observacao || ""} onChange={(e) => setForm({ ...form, observacao: e.target.value })} placeholder="Ex: bora treinar pesado hoje!" />
               </Field>
             </>
           )}
@@ -1262,6 +1376,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               onEditar={abrirEdicaoTreino}
               onExcluir={excluir} onCompartilhar={compartilhar} legendas={legendas}
               destaque={w.id === bannerWorkoutId}
+              senha={senha}
             />
           ))}
           {modoTodos && !busca.trim() && workouts.length < total && (
@@ -1318,20 +1433,20 @@ function ProgressoTreinos({ logs }) {
             {g.nome}{g.blocoNome && ` — ${g.blocoNome}`}
           </div>
           <div style={{ fontSize: 11, color: "#71727A", marginBottom: 12 }}>
-            {g.ehTempo ? "Tempo — menor é melhor" : "Pontuação — maior é melhor"} · {g.itens.length} registros
+            {rotuloTipo(g.tipo)} · {g.itens.length} registros
           </div>
 
           <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 10.5, color: "#71727A", textTransform: "uppercase", letterSpacing: "0.04em" }}>Melhor</div>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 17, color: "#4CAF6D", fontWeight: 700 }}>
-                {g.ehTempo ? formatarSegundos(g.melhor) : g.melhor}
+                {formatarValor(g.tipo, g.melhor)}
               </div>
             </div>
             <div>
               <div style={{ fontSize: 10.5, color: "#71727A", textTransform: "uppercase", letterSpacing: "0.04em" }}>Pior</div>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 17, color: "#E6483F", fontWeight: 700 }}>
-                {g.ehTempo ? formatarSegundos(g.pior) : g.pior}
+                {formatarValor(g.tipo, g.pior)}
               </div>
             </div>
           </div>
@@ -1343,15 +1458,15 @@ function ProgressoTreinos({ logs }) {
                 <XAxis dataKey="data" tick={{ fontSize: 10, fill: "#71727A" }} />
                 <YAxis
                   tick={{ fontSize: 10, fill: "#71727A" }}
-                  reversed={g.ehTempo}
+                  reversed={menorEhMelhor(g.tipo)}
                   domain={["auto", "auto"]}
-                  tickFormatter={(v) => (g.ehTempo ? formatarSegundos(v) : v)}
+                  tickFormatter={(v) => formatarValor(g.tipo, v)}
                   width={46}
                 />
                 <Tooltip
                   contentStyle={{ background: "#212226", border: "1px solid #3A3B40", borderRadius: 8, fontSize: 12 }}
                   labelStyle={{ color: "#F1EFE9" }}
-                  formatter={(v) => [g.ehTempo ? formatarSegundos(v) : v, "Resultado"]}
+                  formatter={(v) => [formatarValor(g.tipo, v), "Resultado"]}
                 />
                 <Line type="monotone" dataKey="valor" stroke="#E4DE00" strokeWidth={2} dot={{ r: 3, fill: "#E4DE00" }} />
               </LineChart>
@@ -1366,7 +1481,7 @@ function ProgressoTreinos({ logs }) {
   );
 }
 
-function LogTab({ legendas }) {
+function LogTab({ legendas, senha }) {
   const [atleta, setAtletaState] = useState(() => localStorage.getItem("cantil_atleta_nome") || "");
   const [nomeInput, setNomeInput] = useState("");
   const [logs, setLogs] = useState([]);
@@ -1375,6 +1490,7 @@ function LogTab({ legendas }) {
   const [salvando, setSalvando] = useState(false);
   const [workoutsRecentes, setWorkoutsRecentes] = useState([]);
   const [form, setForm] = useState({ data: new Date().toISOString().slice(0, 10), workoutId: "", blocoId: "", nivel: "Verde", resultado: "", ajuste: "", notas: "" });
+  const { pedir, Modal } = useSenhaGate(senha);
 
   const carregarLogs = useCallback(async (nome) => {
     setCarregando(true);
@@ -1445,7 +1561,10 @@ function LogTab({ legendas }) {
     setSheetAberto(false);
     carregarLogs(atleta);
   };
-  const excluir = async (id) => { await excluirLogDb(id); setLogs((prev) => prev.filter((l) => l.id !== id)); };
+  const excluir = (id) => pedir(async () => {
+    await excluirLogDb(id);
+    setLogs((prev) => prev.filter((l) => l.id !== id));
+  });
 
   return (
     <div>
@@ -1522,16 +1641,17 @@ function LogTab({ legendas }) {
             <TextInput value={form.resultado} onChange={(e) => setForm({ ...form, resultado: e.target.value })} placeholder="Ex: 12:34 / 5 rounds + 10 reps" />
           </Field>
           <Field label="Ajuste / adaptação feita">
-            <TextArea value={form.ajuste} onChange={(e) => setForm({ ...form, ajuste: e.target.value })} placeholder="Ex: troquei push press por strict press por causa do ombro" />
+            <AutoTextArea value={form.ajuste} onChange={(e) => setForm({ ...form, ajuste: e.target.value })} placeholder="Ex: troquei push press por strict press por causa do ombro" />
           </Field>
           <Field label="Notas">
-            <TextArea value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} placeholder="Como se sentiu, observações..." />
+            <AutoTextArea value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} placeholder="Como se sentiu, observações..." />
           </Field>
           <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%", marginTop: 6 }}>
             <Save size={16} /> {salvando ? "Salvando..." : "Salvar registro"}
           </PrimaryButton>
         </Sheet>
       )}
+      {Modal}
     </div>
   );
 }
@@ -1678,7 +1798,7 @@ export default function App() {
                 />
               </>
             )}
-            {aba === "log" && <LogTab legendas={legendas} />}
+            {aba === "log" && <LogTab legendas={legendas} senha={senha} />}
           </>
         )}
       </div>
