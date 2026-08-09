@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Dumbbell, ListChecks, ClipboardList, Plus, X, Search,
+  Dumbbell, ListChecks, Plus, X, Search,
   ChevronDown, ChevronRight, Trash2, Pencil, Timer,
-  Users, Lock, Save, Layers, Flag, Target, Zap, Share2, Check, ArrowLeft, LogOut,
-  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, TrendingUp
+  Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
+  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen
 } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase } from "./supabaseClient.js";
 
 /* ---------------------------------------------------------
@@ -81,102 +80,6 @@ function formatarDataHora(iso) {
   }
 }
 
-// Tenta ler o campo "resultado" (texto livre) como tempo, peso ou rounds/reps.
-function parseResultado(resultado) {
-  if (!resultado) return null;
-  const str = resultado.trim();
-
-  const pesoMatch = str.match(/(\d+(?:[.,]\d+)?)\s*(kg|lbs?|libras?)\b/i);
-  if (pesoMatch) {
-    return { valor: parseFloat(pesoMatch[1].replace(",", ".")), tipo: "peso" };
-  }
-
-  const tempoMatch = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-  if (tempoMatch) {
-    const partes = [tempoMatch[1], tempoMatch[2], tempoMatch[3]].filter(Boolean).map(Number);
-    let segundos;
-    if (partes.length === 3) segundos = partes[0] * 3600 + partes[1] * 60 + partes[2];
-    else segundos = partes[0] * 60 + partes[1];
-    return { valor: segundos, tipo: "tempo" };
-  }
-
-  const n = str.match(/\d+(\.\d+)?/);
-  if (n) return { valor: parseFloat(n[0]), tipo: "rounds" };
-  return null;
-}
-
-const menorEhMelhor = (tipo) => tipo === "tempo";
-
-function rotuloTipo(tipo) {
-  if (tipo === "tempo") return "Tempo — menor é sempre melhor";
-  if (tipo === "peso") return "Peso — maior é sempre melhor";
-  return "Rounds/Reps — maior é sempre melhor";
-}
-
-function formatarValor(tipo, valor) {
-  if (tipo === "tempo") return formatarSegundos(valor);
-  if (tipo === "peso") return `${valor} kg`;
-  return `${valor}`;
-}
-
-function formatarSegundos(s) {
-  const total = Math.round(s);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const sec = total % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-  return `${m}:${String(sec).padStart(2, "0")}`;
-}
-
-// Agrupa os registros do atleta por treino (mesmo nome + mesmo bloco) pra montar o progresso.
-function agruparProgresso(logs) {
-  const grupos = {};
-  logs.forEach((l) => {
-    const parsed = parseResultado(l.resultado);
-    if (!parsed) return;
-    const chave = `${(l.workoutNome || "").trim().toLowerCase()}|${(l.blocoNome || "").trim().toLowerCase()}`;
-    if (!grupos[chave]) {
-      grupos[chave] = { nome: l.workoutNome || "Treino livre", blocoNome: l.blocoNome || "", tipo: parsed.tipo, itens: [] };
-    }
-    grupos[chave].itens.push({ data: l.data, valor: parsed.valor, resultado: l.resultado });
-  });
-  return Object.values(grupos)
-    .filter((g) => g.itens.length >= 2)
-    .map((g) => {
-      const ordenado = [...g.itens].sort((a, b) => (a.data < b.data ? -1 : 1));
-      const valores = ordenado.map((i) => i.valor);
-      const menorMelhor = menorEhMelhor(g.tipo);
-      const melhor = menorMelhor ? Math.min(...valores) : Math.max(...valores);
-      const pior = menorMelhor ? Math.max(...valores) : Math.min(...valores);
-      return { ...g, itens: ordenado, melhor, pior };
-    });
-}
-
-// Compara TODOS os alunos num mesmo treino/bloco (turma inteira) — usado no comparativo da turma.
-async function fetchComparativoTurma(workoutId) {
-  const { data, error } = await supabase.from("logs").select("*").eq("workout_id", workoutId);
-  if (error) { console.error(error); return []; }
-  const porBloco = {};
-  data.forEach((r) => {
-    const l = logFromDb(r);
-    const parsed = parseResultado(l.resultado);
-    if (!parsed) return;
-    const chave = (l.blocoNome || "").trim().toLowerCase();
-    if (!porBloco[chave]) porBloco[chave] = { blocoNome: l.blocoNome || "", tipo: parsed.tipo, itens: [] };
-    porBloco[chave].itens.push({ atleta: l.atleta, valor: parsed.valor, resultado: l.resultado });
-  });
-  return Object.values(porBloco)
-    .filter((g) => g.itens.length >= 2)
-    .map((g) => {
-      const menorMelhor = menorEhMelhor(g.tipo);
-      const ordenado = [...g.itens].sort((a, b) => (menorMelhor ? a.valor - b.valor : b.valor - a.valor));
-      const melhorItem = ordenado[0];
-      const piorItem = ordenado[ordenado.length - 1];
-      const distancia = Math.abs(melhorItem.valor - piorItem.valor);
-      return { ...g, ordenado, melhorItem, piorItem, distancia };
-    });
-}
-
 /* ---------------------------- mapeamento banco <-> app ---------------------------- */
 
 const exercicioFromDb = (r) => ({
@@ -200,14 +103,14 @@ const workoutToDb = (w) => ({
   warmup_geral: w.warmupGeral, warmup_especifico: w.warmupEspecifico, skill: w.skill, blocos: w.blocos,
 });
 
-const logFromDb = (r) => ({
-  id: r.id, atleta: r.atleta, data: r.data, workoutId: r.workout_id, workoutNome: r.workout_nome || "",
-  blocoNome: r.bloco_nome || "", nivel: r.nivel || "Verde", resultado: r.resultado || "",
-  ajuste: r.ajuste || "", notas: r.notas || "",
+const protocoloFromDb = (r) => ({
+  id: r.id, titulo: r.titulo || "", resumo: r.resumo || "", descricao: r.descricao || "",
+  duracao: r.duracao || "", objetivo: r.objetivo || "", tags: r.tags || "",
+  criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
 });
-const logToDb = (l) => ({
-  atleta: l.atleta, data: l.data, workout_id: l.workoutId || null, workout_nome: l.workoutNome,
-  bloco_nome: l.blocoNome, nivel: l.nivel, resultado: l.resultado, ajuste: l.ajuste, notas: l.notas,
+const protocoloToDb = (p) => ({
+  titulo: p.titulo, resumo: p.resumo, descricao: p.descricao,
+  duracao: p.duracao, objetivo: p.objetivo, tags: p.tags || "",
 });
 
 /* ---------------------------- acesso a dados (Supabase) ---------------------------- */
@@ -311,21 +214,32 @@ async function excluirWorkoutDb(id) {
   if (error) console.error(error);
 }
 
-async function fetchLogs(atleta) {
-  const { data, error } = await supabase
-    .from("logs").select("*").eq("atleta", atleta)
-    .order("data", { ascending: false }).order("criado_em", { ascending: false });
+async function fetchProtocolos() {
+  const { data, error } = await supabase.from("protocolos").select("*").order("criado_em", { ascending: false });
   if (error) { console.error(error); return []; }
-  return data.map(logFromDb);
+  return data.map(protocoloFromDb);
 }
-async function inserirLogDb(l) {
-  const { data, error } = await supabase.from("logs").insert(logToDb(l)).select().single();
+async function inserirProtocoloDb(p) {
+  const agora = new Date().toISOString();
+  const payload = { ...protocoloToDb(p), criado_em: agora, atualizado_em: agora };
+  const { data, error } = await supabase.from("protocolos").insert(payload).select().single();
   if (error) { console.error(error); return null; }
-  return logFromDb(data);
+  return protocoloFromDb(data);
 }
-async function excluirLogDb(id) {
-  const { error } = await supabase.from("logs").delete().eq("id", id);
+async function atualizarProtocoloDb(id, p) {
+  const payload = { ...protocoloToDb(p), atualizado_em: new Date().toISOString() };
+  const { data, error } = await supabase.from("protocolos").update(payload).eq("id", id).select().single();
+  if (error) { console.error(error); return null; }
+  return protocoloFromDb(data);
+}
+async function excluirProtocoloDb(id) {
+  const { error } = await supabase.from("protocolos").delete().eq("id", id);
   if (error) console.error(error);
+}
+async function fetchProtocoloById(id) {
+  const { data, error } = await supabase.from("protocolos").select("*").eq("id", id).maybeSingle();
+  if (error || !data) { if (error) console.error(error); return null; }
+  return protocoloFromDb(data);
 }
 
 async function fetchConfig() {
@@ -360,6 +274,17 @@ async function removerBannerDb() {
     id: 1, tipo: null, workout_id: null, titulo: null, descricao: null, observacao: null,
     atualizado_em: new Date().toISOString(),
   });
+  if (error) console.error(error);
+}
+
+async function fetchApresentacao() {
+  const { data, error } = await supabase.from("apresentacao").select("*").eq("id", 1).maybeSingle();
+  if (error || !data || !data.titulo) { if (error) console.error(error); return null; }
+  return { tag: data.tag || "", titulo: data.titulo || "", descricao: data.descricao || "", atualizadoEm: data.atualizado_em };
+}
+async function salvarApresentacaoDb(ap) {
+  const payload = { id: 1, tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "", atualizado_em: new Date().toISOString() };
+  const { error } = await supabase.from("apresentacao").upsert(payload);
   if (error) console.error(error);
 }
 
@@ -427,18 +352,16 @@ function TextInput(props) { return <input {...props} style={{ ...inputStyle, ...
 function TextArea(props) { return <textarea {...props} style={{ ...inputStyle, resize: "vertical", minHeight: 70, ...(props.style || {}) }} />; }
 function AutoTextArea(props) {
   const ref = useRef(null);
-  const ajustarAltura = () => {
+  useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
-  };
-  useEffect(() => { ajustarAltura(); }, [props.value]);
+  }, [props.value]);
   return (
     <textarea
       {...props}
       ref={ref}
-      onInput={ajustarAltura}
       style={{ ...inputStyle, resize: "vertical", minHeight: 88, overflow: "hidden", lineHeight: 1.5, ...(props.style || {}) }}
     />
   );
@@ -649,15 +572,21 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const [sheetAberto, setSheetAberto] = useState(false);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [novaCategoria, setNovaCategoria] = useState(false);
   const [form, setForm] = useState({ nome: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
   const { pedir, Modal } = useSenhaGate(senha);
 
+  const categoriasExistentes = Array.from(
+    new Set([...GRUPOS_SUGERIDOS, ...exercicios.map((e) => e.grupoGrande).filter(Boolean)])
+  ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+
   const abrirNovo = () => pedir(() => {
     setEditando(null);
+    setNovaCategoria(false);
     setForm({ nome: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
     setSheetAberto(true);
   });
-  const abrirEdicao = (ex) => pedir(() => { setEditando(ex.id); setForm(ex); setSheetAberto(true); });
+  const abrirEdicao = (ex) => pedir(() => { setEditando(ex.id); setNovaCategoria(false); setForm(ex); setSheetAberto(true); });
 
   const salvar = async () => {
     if (!form.nome.trim() || salvando) return;
@@ -669,7 +598,9 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   };
   const excluir = (id) => pedir(async () => { await excluirExercicioDb(id); recarregar(); });
 
-  const filtrados = exercicios.filter((e) => (e.nome + e.grupoGrande + e.grupoMenor).toLowerCase().includes(busca.toLowerCase()));
+  const textoBuscavelEx = (e) => [e.nome, e.grupoGrande, e.grupoMenor, e.equipamento, e.descricao]
+    .filter(Boolean).join(" ").toLowerCase();
+  const filtrados = exercicios.filter((e) => textoBuscavelEx(e).includes(busca.trim().toLowerCase()));
   const grupos = {};
   filtrados.forEach((e) => { const g = e.grupoGrande || "Sem grupo"; grupos[g] = grupos[g] || []; grupos[g].push(e); });
 
@@ -678,7 +609,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <div style={{ position: "relative", flex: 1 }}>
           <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
-          <TextInput placeholder="Buscar exercício..." value={busca} onChange={(e) => setBusca(e.target.value)} style={{ paddingLeft: 32 }} />
+          <TextInput placeholder="Buscar por nome, categoria, equipamento, descrição..." value={busca} onChange={(e) => setBusca(e.target.value)} style={{ paddingLeft: 32 }} />
         </div>
         <button onClick={abrirNovo} style={{ background: "#E4DE00", border: "none", borderRadius: 8, width: 42, color: "#0A0A0A", cursor: "pointer" }}>
           <Plus size={20} style={{ margin: "auto" }} />
@@ -730,9 +661,28 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
           <Field label="Nome do exercício">
             <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex: Snatch" />
           </Field>
-          <Field label="Grupo grande">
-            <TextInput list="grupos-grandes" value={form.grupoGrande} onChange={(e) => setForm({ ...form, grupoGrande: e.target.value })} placeholder="Ex: Levantamento Olímpico" />
-            <datalist id="grupos-grandes">{GRUPOS_SUGERIDOS.map((g) => <option key={g} value={g} />)}</datalist>
+          <Field label="Grupo grande (categoria)">
+            <Select
+              value={novaCategoria ? "__nova__" : form.grupoGrande}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__nova__") { setNovaCategoria(true); setForm({ ...form, grupoGrande: "" }); }
+                else { setNovaCategoria(false); setForm({ ...form, grupoGrande: v }); }
+              }}
+            >
+              <option value="">Selecione uma categoria...</option>
+              {categoriasExistentes.map((c) => <option key={c} value={c}>{c}</option>)}
+              <option value="__nova__">+ Criar nova categoria...</option>
+            </Select>
+            {novaCategoria && (
+              <TextInput
+                value={form.grupoGrande}
+                onChange={(e) => setForm({ ...form, grupoGrande: e.target.value })}
+                placeholder="Digite o nome da nova categoria"
+                style={{ marginTop: 6 }}
+                autoFocus
+              />
+            )}
           </Field>
           <Field label="Grupo menor / variação">
             <TextInput value={form.grupoMenor} onChange={(e) => setForm({ ...form, grupoMenor: e.target.value })} placeholder="Ex: Power Snatch" />
@@ -761,7 +711,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
 ================================================================= */
 
 function blocoVazio() {
-  return { id: uid(), titulo: "", nivel: "Verde", formato: FORMATOS[0], requisitos: "", objetivos: "", conteudo: "" };
+  return { id: uid(), titulo: "", nivel: "Verde", formato: FORMATOS[0], timeCap: "", requisitos: "", objetivos: "", conteudo: "", resultado: "", resultadoData: null };
 }
 
 function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando }) {
@@ -770,7 +720,15 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando })
     warmupGeral: "", warmupEspecifico: "", skill: "", blocos: [blocoVazio()],
   });
 
-  const atualizarBloco = (id, campo, valor) => setForm({ ...form, blocos: form.blocos.map((b) => (b.id === id ? { ...b, [campo]: valor } : b)) });
+  const atualizarBloco = (id, campo, valor) => setForm({
+    ...form,
+    blocos: form.blocos.map((b) => {
+      if (b.id !== id) return b;
+      const atualizado = { ...b, [campo]: valor };
+      if (campo === "resultado") atualizado.resultadoData = new Date().toISOString();
+      return atualizado;
+    }),
+  });
   const addBloco = () => setForm({ ...form, blocos: [...form.blocos, blocoVazio()] });
   const removerBloco = (id) => setForm({ ...form, blocos: form.blocos.filter((b) => b.id !== id) });
 
@@ -843,6 +801,13 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando })
               )}
             </Field>
           </div>
+          <Field label="Time cap (opcional)">
+            <TextInput
+              value={b.timeCap || ""}
+              onChange={(e) => atualizarBloco(b.id, "timeCap", e.target.value)}
+              placeholder="Ex: 20' ou 12min"
+            />
+          </Field>
           <Field label="Requisitos p/ esse workout">
             <AutoTextArea value={b.requisitos} onChange={(e) => atualizarBloco(b.id, "requisitos", e.target.value)} placeholder="Pré-requisitos técnicos, peso mínimo, mobilidade..." />
           </Field>
@@ -851,6 +816,19 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando })
           </Field>
           <Field label="Conteúdo (movimentos, reps, tempo)">
             <AutoTextArea value={b.conteudo} onChange={(e) => atualizarBloco(b.id, "conteudo", e.target.value)} placeholder={"Ex: 21-15-9\nThrusters\nPull-ups"} style={{ minHeight: 160 }} />
+          </Field>
+          <Field label="Resultado (opcional)">
+            <AutoTextArea
+              value={b.resultado || ""}
+              onChange={(e) => atualizarBloco(b.id, "resultado", e.target.value)}
+              placeholder="Ex: Time cap ultrapassado aos 40'"
+              style={{ minHeight: 70 }}
+            />
+            {b.resultado && b.resultadoData && (
+              <div style={{ fontSize: 11, color: "#5f6066", marginTop: 5 }}>
+                Registrado automaticamente em {formatarDataHora(b.resultadoData)}
+              </div>
+            )}
           </Field>
         </div>
       ))}
@@ -909,80 +887,22 @@ function WorkoutDetalhes({ w, legendas = {} }) {
             </span>
             <Stamp nome={b.nivel} cor={corDoNivel(b.nivel)} size="sm" />
             <Badge>{b.formato}</Badge>
+            {b.timeCap && <Badge><Timer size={10} style={{ display: "inline", marginRight: 3, verticalAlign: -1 }} />Time cap {b.timeCap}</Badge>}
           </div>
           {legendas[b.nivel] && <div style={{ fontSize: 11.5, color: "#8C8D91", fontStyle: "italic", marginBottom: 6 }}>{legendas[b.nivel]}</div>}
           {b.requisitos && <div style={{ fontSize: 12.5, color: "#B9BABF", marginBottom: 4 }}><span style={{ color: "#9A9A94", fontWeight: 600 }}>Requisitos: </span>{b.requisitos}</div>}
           {b.objetivos && <div style={{ fontSize: 12.5, color: "#B9BABF", marginBottom: 4 }}><span style={{ color: "#9A9A94", fontWeight: 600 }}>Objetivos: </span>{b.objetivos}</div>}
           {b.conteudo && <div style={{ fontSize: 13, color: "#F1EFE9", whiteSpace: "pre-wrap", marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>{b.conteudo}</div>}
+          {b.resultado && (
+            <div style={{ marginTop: 10, background: "rgba(228,222,0,0.08)", border: "1px solid rgba(228,222,0,0.3)", borderRadius: 8, padding: "8px 10px" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: "#E4DE00", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>Resultado</div>
+              <div style={{ fontSize: 13, color: "#F1EFE9", whiteSpace: "pre-wrap" }}>{b.resultado}</div>
+              {b.resultadoData && <div style={{ fontSize: 10.5, color: "#8C8D91", marginTop: 4 }}>{formatarDataHora(b.resultadoData)}</div>}
+            </div>
+          )}
         </div>
       ))}
     </>
-  );
-}
-
-function ComparativoTurma({ workoutId, senha }) {
-  const { pedir, Modal } = useSenhaGate(senha);
-  const [mostrando, setMostrando] = useState(false);
-  const [carregando, setCarregando] = useState(false);
-  const [grupos, setGrupos] = useState(null);
-
-  const abrir = () => pedir(async () => {
-    setMostrando(true);
-    setCarregando(true);
-    const rows = await fetchComparativoTurma(workoutId);
-    setGrupos(rows);
-    setCarregando(false);
-  });
-
-  if (!mostrando) {
-    return (
-      <GhostButton onClick={abrir} style={{ width: "100%", marginTop: 14 }}>
-        <Lock size={14} /> Ver comparativo da turma
-      </GhostButton>
-    );
-  }
-
-  return (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ fontSize: 11, color: "#71727A", marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}>
-        <Users size={12} /> Comparativo entre todos que registraram esse treino
-      </div>
-      {carregando ? (
-        <Spinner label="Calculando..." />
-      ) : grupos && grupos.length > 0 ? (
-        grupos.map((g) => (
-          <div key={g.blocoNome} style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 10, padding: 12, marginBottom: 8 }}>
-            {g.blocoNome && <div style={{ fontSize: 12, fontWeight: 700, color: "#F1EFE9", marginBottom: 6 }}>{g.blocoNome}</div>}
-            <div style={{ fontSize: 10.5, color: "#71727A", marginBottom: 8 }}>{rotuloTipo(g.tipo)} · {g.itens.length} alunos</div>
-            <div style={{ display: "flex", gap: 20, marginBottom: 8 }}>
-              <div>
-                <div style={{ fontSize: 10, color: "#71727A", textTransform: "uppercase" }}>Melhor</div>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, color: "#4CAF6D", fontWeight: 700 }}>
-                  {formatarValor(g.tipo, g.melhorItem.valor)}
-                </div>
-                <div style={{ fontSize: 11.5, color: "#B9BABF" }}>{g.melhorItem.atleta}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10, color: "#71727A", textTransform: "uppercase" }}>Pior</div>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, color: "#E6483F", fontWeight: 700 }}>
-                  {formatarValor(g.tipo, g.piorItem.valor)}
-                </div>
-                <div style={{ fontSize: 11.5, color: "#B9BABF" }}>{g.piorItem.atleta}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10, color: "#71727A", textTransform: "uppercase" }}>Distância</div>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, color: "#E4DE00", fontWeight: 700 }}>
-                  {formatarValor(g.tipo, g.distancia)}
-                </div>
-              </div>
-            </div>
-          </div>
-        ))
-      ) : (
-        <EmptyState text="Ainda não há pelo menos 2 alunos com resultado registrado nesse treino." />
-      )}
-      {Modal}
-    </div>
   );
 }
 
@@ -1023,7 +943,6 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onTogg
             <GhostButton onClick={() => onEditar(w)} style={{ flex: 1 }}><Pencil size={14} /> Editar</GhostButton>
             <GhostButton onClick={() => onExcluir(w.id)} style={{ flex: 1 }}><Trash2 size={14} /> Excluir</GhostButton>
           </div>
-          <ComparativoTurma workoutId={w.id} senha={senha} />
         </div>
       )}
     </div>
@@ -1240,8 +1159,11 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const [carregando, setCarregando] = useState(true);
   const [carregandoMais, setCarregandoMais] = useState(false);
   const [total, setTotal] = useState(0);
+
   const [busca, setBusca] = useState("");
   const [buscando, setBuscando] = useState(false);
+  const [resultadosBusca, setResultadosBusca] = useState([]);
+  const buscaAtiva = busca.trim().length > 0;
 
   const [sheetAberto, setSheetAberto] = useState(false);
   const [editando, setEditando] = useState(null);
@@ -1268,19 +1190,18 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setCarregando(false);
   }, []);
 
+  // A busca roda sempre, independente do modo, direto no banco, e não pede senha.
   useEffect(() => {
-    if (!modoTodos) return;
     clearTimeout(debounceRef.current);
-    if (!busca.trim()) { carregarPrimeiraPagina(); return; }
+    if (!busca.trim()) { setResultadosBusca([]); setBuscando(false); return; }
     setBuscando(true);
     debounceRef.current = setTimeout(async () => {
       const rows = await searchWorkoutsDb(busca.trim());
-      setWorkouts(rows);
+      setResultadosBusca(rows);
       setBuscando(false);
     }, 350);
     return () => clearTimeout(debounceRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busca, modoTodos]);
+  }, [busca]);
 
   const carregarMais = async () => {
     setCarregandoMais(true);
@@ -1292,13 +1213,14 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const abrirNovoTreino = () => pedir(() => { setEditando(null); setSheetAberto(true); });
   const abrirEdicaoTreino = (w) => pedir(() => { setEditando(w.id); setSheetAberto(true); });
   const abrirTodos = () => pedir(() => { setModoTodos(true); carregarPrimeiraPagina(); });
-  const voltarRecentes = () => { setModoTodos(false); setBusca(""); };
+  const voltarRecentes = () => setModoTodos(false);
 
   const recarregarTudo = async () => {
     await carregarRecentes();
-    if (modoTodos) {
-      if (busca.trim()) { const rows = await searchWorkoutsDb(busca.trim()); setWorkouts(rows); }
-      else { await carregarPrimeiraPagina(); }
+    if (modoTodos) await carregarPrimeiraPagina();
+    if (busca.trim()) {
+      const rows = await searchWorkoutsDb(busca.trim());
+      setResultadosBusca(rows);
     }
   };
 
@@ -1320,6 +1242,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     await excluirWorkoutDb(id);
     setWorkouts((prev) => prev.filter((w) => w.id !== id));
     setRecentes((prev) => prev.filter((w) => w.id !== id));
+    setResultadosBusca((prev) => prev.filter((w) => w.id !== id));
     setTotalGeral((prev) => Math.max(0, prev - 1));
   });
 
@@ -1328,11 +1251,9 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     onToast(ok ? "Link do treino copiado!" : "Não consegui copiar o link");
   };
 
-  const listaExibida = modoTodos ? workouts : recentes;
-  const carregandoLista = modoTodos ? carregando : carregandoRecentes;
-  const treinoEmEdicao = modoTodos
-    ? workouts.find((w) => w.id === editando)
-    : recentes.find((w) => w.id === editando);
+  const listaExibida = buscaAtiva ? resultadosBusca : (modoTodos ? workouts : recentes);
+  const carregandoLista = buscaAtiva ? false : (modoTodos ? carregando : carregandoRecentes);
+  const treinoEmEdicao = [...recentes, ...workouts, ...resultadosBusca].find((w) => w.id === editando);
 
   return (
     <div>
@@ -1346,19 +1267,31 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
 
       <LegendaNiveis legendas={legendas} setLegendas={setLegendas} senha={senha} />
 
-      {modoTodos ? (
-        <>
-          <GhostButton onClick={voltarRecentes} style={{ marginBottom: 14 }}>
-            <ArrowLeft size={14} /> Voltar aos recentes
-          </GhostButton>
-          <div style={{ position: "relative", marginBottom: 14 }}>
-            <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
-            <TextInput placeholder="Buscar por nome, código, categoria ou tag..." value={busca} onChange={(e) => setBusca(e.target.value)} style={{ paddingLeft: 32 }} />
-          </div>
-        </>
-      ) : (
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
+        <TextInput
+          placeholder="Buscar por qualquer palavra: nome, código, categoria, tag..."
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          style={{ paddingLeft: 32 }}
+        />
+      </div>
+
+      {!buscaAtiva && modoTodos && (
+        <GhostButton onClick={voltarRecentes} style={{ marginBottom: 14 }}>
+          <ArrowLeft size={14} /> Voltar aos recentes
+        </GhostButton>
+      )}
+
+      {!buscaAtiva && !modoTodos && (
         <div style={{ fontSize: 11.5, color: "#5f6066", marginBottom: 12 }}>
           Mostrando os {Math.min(6, totalGeral)} treinos mais recentes
+        </div>
+      )}
+
+      {buscaAtiva && (
+        <div style={{ fontSize: 11.5, color: "#5f6066", marginBottom: 12 }}>
+          {buscando ? "Buscando..." : `${resultadosBusca.length} resultado(s) para "${busca.trim()}"`}
         </div>
       )}
 
@@ -1367,7 +1300,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       ) : (
         <>
           {listaExibida.length === 0 && (
-            <EmptyState text={busca.trim() ? "Nenhum treino encontrado para essa busca." : "Nenhum treino programado ainda. Toque em 'Novo treino'."} />
+            <EmptyState text={buscaAtiva ? "Nenhum treino encontrado para essa busca." : "Nenhum treino programado ainda. Toque em 'Novo treino'."} />
           )}
           {listaExibida.map((w) => (
             <WorkoutCard
@@ -1379,17 +1312,16 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               senha={senha}
             />
           ))}
-          {modoTodos && !busca.trim() && workouts.length < total && (
+          {!buscaAtiva && modoTodos && workouts.length < total && (
             <GhostButton onClick={carregarMais} style={{ width: "100%" }}>
               {carregandoMais ? "Carregando..." : `Carregar mais (${workouts.length}/${total})`}
             </GhostButton>
           )}
-          {!modoTodos && totalGeral > 6 && (
+          {!buscaAtiva && !modoTodos && totalGeral > 6 && (
             <GhostButton onClick={abrirTodos} style={{ width: "100%" }}>
               <Lock size={14} /> Ver todos os treinos ({totalGeral})
             </GhostButton>
           )}
-          {buscando && <div style={{ fontSize: 12, color: "#71727A", textAlign: "center", marginTop: 8 }}>Buscando...</div>}
         </>
       )}
 
@@ -1411,250 +1343,390 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
 }
 
 /* =================================================================
-   LOG PESSOAL (execução + ajustes)
+   PROTOCOLOS DE TREINO
 ================================================================= */
 
-function ProgressoTreinos({ logs }) {
-  const grupos = agruparProgresso(logs);
-  if (grupos.length === 0) return null;
+function buildShareUrlProtocolo(protocoloId) {
+  const { origin, pathname } = window.location;
+  return `${origin}${pathname}#/p/${protocoloId}`;
+}
+
+function ProtocoloForm({ inicial, onSalvar, onCancelar, salvando }) {
+  const [form, setForm] = useState(inicial || { titulo: "", resumo: "", duracao: "", objetivo: "", tags: "", descricao: "" });
 
   return (
-    <div style={{ marginBottom: 18 }}>
-      <div style={{
-        fontFamily: "'Anton', sans-serif", fontSize: 14, color: "#F1EFE9", textTransform: "uppercase",
-        marginBottom: 10, letterSpacing: "0.04em", display: "flex", alignItems: "center", gap: 7,
-      }}>
-        <TrendingUp size={15} color="#E4DE00" /> Seu progresso
+    <div>
+      <Field label="Título do protocolo">
+        <TextInput value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder='Ex: "Protocolo de força — 8 semanas"' />
+      </Field>
+      <Field label="Resumo breve (aparece na lista)">
+        <AutoTextArea
+          value={form.resumo}
+          onChange={(e) => setForm({ ...form, resumo: e.target.value })}
+          placeholder="Em 1-2 frases: do que se trata esse protocolo..."
+          style={{ minHeight: 60 }}
+        />
+      </Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <Field label="Duração (opcional)">
+          <TextInput value={form.duracao} onChange={(e) => setForm({ ...form, duracao: e.target.value })} placeholder="Ex: 8 semanas" />
+        </Field>
+        <Field label="Objetivo (opcional)">
+          <TextInput value={form.objetivo} onChange={(e) => setForm({ ...form, objetivo: e.target.value })} placeholder="Ex: Hipertrofia" />
+        </Field>
       </div>
-
-      {grupos.map((g) => (
-        <div key={`${g.nome}|${g.blocoNome}`} style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 12, padding: 14, marginBottom: 10 }}>
-          <div style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>
-            {g.nome}{g.blocoNome && ` — ${g.blocoNome}`}
-          </div>
-          <div style={{ fontSize: 11, color: "#71727A", marginBottom: 12 }}>
-            {rotuloTipo(g.tipo)} · {g.itens.length} registros
-          </div>
-
-          <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
-            <div>
-              <div style={{ fontSize: 10.5, color: "#71727A", textTransform: "uppercase", letterSpacing: "0.04em" }}>Melhor</div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 17, color: "#4CAF6D", fontWeight: 700 }}>
-                {formatarValor(g.tipo, g.melhor)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10.5, color: "#71727A", textTransform: "uppercase", letterSpacing: "0.04em" }}>Pior</div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 17, color: "#E6483F", fontWeight: 700 }}>
-                {formatarValor(g.tipo, g.pior)}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ width: "100%", height: 140 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={g.itens} margin={{ top: 5, right: 8, left: -18, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#26272B" />
-                <XAxis dataKey="data" tick={{ fontSize: 10, fill: "#71727A" }} />
-                <YAxis
-                  tick={{ fontSize: 10, fill: "#71727A" }}
-                  reversed={menorEhMelhor(g.tipo)}
-                  domain={["auto", "auto"]}
-                  tickFormatter={(v) => formatarValor(g.tipo, v)}
-                  width={46}
-                />
-                <Tooltip
-                  contentStyle={{ background: "#212226", border: "1px solid #3A3B40", borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: "#F1EFE9" }}
-                  formatter={(v) => [formatarValor(g.tipo, v), "Resultado"]}
-                />
-                <Line type="monotone" dataKey="valor" stroke="#E4DE00" strokeWidth={2} dot={{ r: 3, fill: "#E4DE00" }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <div style={{ fontSize: 10.5, color: "#5f6066", marginTop: 4, textAlign: "center" }}>
-            (linha subindo = evolução, mesmo em treinos por tempo)
-          </div>
-        </div>
-      ))}
+      <Field label="Tags / palavras-chave">
+        <TextInput value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder="Ex: força, iniciante, retorno de lesão" />
+      </Field>
+      <Field label="Descrição completa do protocolo">
+        <AutoTextArea
+          value={form.descricao}
+          onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+          placeholder={"Explique as fases, regras, progressão, observações..."}
+          style={{ minHeight: 180 }}
+        />
+      </Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <GhostButton onClick={onCancelar} style={{ flex: 1 }}>Cancelar</GhostButton>
+        <PrimaryButton onClick={() => onSalvar(form)} disabled={salvando} style={{ flex: 1 }}>
+          <Save size={16} /> {salvando ? "Salvando..." : "Salvar protocolo"}
+        </PrimaryButton>
+      </div>
     </div>
   );
 }
 
-function LogTab({ legendas, senha }) {
-  const [atleta, setAtletaState] = useState(() => localStorage.getItem("cantil_atleta_nome") || "");
-  const [nomeInput, setNomeInput] = useState("");
-  const [logs, setLogs] = useState([]);
-  const [carregando, setCarregando] = useState(true);
+function ApresentacaoMetodo({ apresentacao, setApresentacao, senha }) {
+  const { pedir, Modal } = useSenhaGate(senha);
   const [sheetAberto, setSheetAberto] = useState(false);
   const [salvando, setSalvando] = useState(false);
-  const [workoutsRecentes, setWorkoutsRecentes] = useState([]);
-  const [form, setForm] = useState({ data: new Date().toISOString().slice(0, 10), workoutId: "", blocoId: "", nivel: "Verde", resultado: "", ajuste: "", notas: "" });
+  const [form, setForm] = useState(apresentacao || { tag: "SOBRE O MÉTODO", titulo: "", descricao: "" });
+
+  const abrirEdicao = () => pedir(() => {
+    setForm(apresentacao || { tag: "SOBRE O MÉTODO", titulo: "", descricao: "" });
+    setSheetAberto(true);
+  });
+
+  const salvar = async () => {
+    setSalvando(true);
+    await salvarApresentacaoDb(form);
+    setApresentacao({ ...form, atualizadoEm: new Date().toISOString() });
+    setSalvando(false);
+    setSheetAberto(false);
+  };
+
+  const temConteudo = apresentacao && apresentacao.titulo;
+
+  return (
+    <div style={{ marginBottom: 22 }}>
+      {temConteudo ? (
+        <div style={{ position: "relative" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <span style={{
+              display: "inline-block", background: "#E4DE00", color: "#0A0A0A", fontWeight: 800,
+              fontSize: 11, letterSpacing: "0.08em", padding: "5px 12px", borderRadius: 4, marginBottom: 14,
+              textTransform: "uppercase",
+            }}>
+              {apresentacao.tag || "SOBRE O MÉTODO"}
+            </span>
+            <Pencil size={16} color="#71727A" style={{ cursor: "pointer", flexShrink: 0, marginTop: 4 }} onClick={abrirEdicao} />
+          </div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
+            {apresentacao.titulo}
+          </div>
+          {apresentacao.descricao && (
+            <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
+              {apresentacao.descricao}
+            </div>
+          )}
+          <div style={{ height: 1, background: "#26272B", marginTop: 20 }} />
+        </div>
+      ) : (
+        <button
+          onClick={abrirEdicao}
+          style={{
+            width: "100%", background: "none", border: "1px dashed #3A3B40", borderRadius: 10, padding: "14px",
+            color: "#71727A", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center",
+            justifyContent: "center", gap: 6, marginBottom: 8,
+          }}
+        >
+          <Plus size={14} /> Adicionar apresentação do método
+        </button>
+      )}
+
+      {Modal}
+
+      {sheetAberto && (
+        <Sheet title="Apresentação do método" onClose={() => setSheetAberto(false)}>
+          <Field label="Etiqueta pequena (opcional)">
+            <TextInput value={form.tag || ""} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="Ex: SOBRE O MÉTODO" />
+          </Field>
+          <Field label="Título grande">
+            <AutoTextArea
+              value={form.titulo}
+              onChange={(e) => setForm({ ...form, titulo: e.target.value })}
+              placeholder='Ex: "CANTIL É UM MÉTODO DE TREINO FUNCIONAL"'
+              style={{ minHeight: 70 }}
+            />
+          </Field>
+          <Field label="Texto de apresentação">
+            <AutoTextArea
+              value={form.descricao}
+              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+              placeholder="Explique sua proposta, filosofia de treino, o que torna o método diferente..."
+              style={{ minHeight: 140 }}
+            />
+          </Field>
+          <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%" }}>
+            <Save size={16} /> {salvando ? "Salvando..." : "Salvar apresentação"}
+          </PrimaryButton>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+function ProtocoloCard({ p, expandido, onToggle, onEditar, onExcluir, onCompartilhar }) {
+  const tags = (p.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
+  return (
+    <div style={{
+      background: "linear-gradient(160deg, #1C1D20, #151618)", border: "1px solid #2A2B2F",
+      borderLeft: "3px solid #E4DE00", borderRadius: 12, marginBottom: 14, overflow: "hidden",
+    }}>
+      <div style={{ padding: "18px 18px 16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, cursor: "pointer" }} onClick={onToggle}>
+          <div>
+            <span style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              Protocolo
+            </span>
+            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#FFFFFF", letterSpacing: "0.02em", textTransform: "uppercase", marginTop: 4, lineHeight: 1.15 }}>
+              {p.titulo || "Protocolo sem título"}
+            </div>
+          </div>
+          {expandido ? <ChevronDown size={20} color="#71727A" style={{ flexShrink: 0, marginTop: 4 }} /> : <ChevronRight size={20} color="#71727A" style={{ flexShrink: 0, marginTop: 4 }} />}
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          {p.duracao && <Badge>{p.duracao}</Badge>}
+          {p.objetivo && <Badge>{p.objetivo}</Badge>}
+        </div>
+
+        {p.resumo && (
+          <div style={{ fontSize: 14.5, color: "#D8D8D3", marginTop: 12, lineHeight: 1.55 }}>{p.resumo}</div>
+        )}
+        {tags.length > 0 && (
+          <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+            {tags.map((t) => <Badge key={t}>{t}</Badge>)}
+          </div>
+        )}
+
+        {!expandido && (
+          <button
+            onClick={onToggle}
+            style={{ background: "none", border: "none", color: "#E4DE00", fontSize: 12.5, fontWeight: 700, padding: 0, marginTop: 14, cursor: "pointer" }}
+          >
+            Ler protocolo completo →
+          </button>
+        )}
+      </div>
+
+      {expandido && (
+        <div style={{ padding: "0 18px 18px", borderTop: "1px solid #26272B" }}>
+          {p.descricao && (
+            <div style={{ fontSize: 13.5, color: "#D8D8D3", whiteSpace: "pre-wrap", marginTop: 16, lineHeight: 1.6 }}>{p.descricao}</div>
+          )}
+          {(p.criadoEm || p.atualizadoEm) && (
+            <div style={{ fontSize: 11, color: "#5f6066", marginTop: 14 }}>
+              {p.criadoEm && `Criado em ${formatarDataHora(p.criadoEm)}`}
+              {p.atualizadoEm && p.atualizadoEm !== p.criadoEm && ` · Editado em ${formatarDataHora(p.atualizadoEm)}`}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <GhostButton onClick={() => onCompartilhar(p)} style={{ flex: 1 }}><Share2 size={14} /> Compartilhar</GhostButton>
+            <GhostButton onClick={() => onEditar(p)} style={{ flex: 1 }}><Pencil size={14} /> Editar</GhostButton>
+            <GhostButton onClick={() => onExcluir(p.id)} style={{ flex: 1 }}><Trash2 size={14} /> Excluir</GhostButton>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProtocolosTab({ senha, onToast }) {
+  const [protocolos, setProtocolos] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [apresentacao, setApresentacao] = useState(null);
+  const [busca, setBusca] = useState("");
+  const [sheetAberto, setSheetAberto] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+  const [expandidoId, setExpandidoId] = useState(null);
   const { pedir, Modal } = useSenhaGate(senha);
 
-  const carregarLogs = useCallback(async (nome) => {
+  const carregar = useCallback(async () => {
     setCarregando(true);
-    const rows = await fetchLogs(nome);
-    setLogs(rows);
+    const [rows, apr] = await Promise.all([fetchProtocolos(), fetchApresentacao()]);
+    setProtocolos(rows);
+    setApresentacao(apr);
     setCarregando(false);
   }, []);
 
-  useEffect(() => {
-    if (atleta) carregarLogs(atleta);
-  }, [atleta, carregarLogs]);
+  useEffect(() => { carregar(); }, [carregar]);
 
-  useEffect(() => {
-    (async () => {
-      const { rows } = await fetchWorkoutsPage(0);
-      setWorkoutsRecentes(rows);
-    })();
-  }, []);
+  const abrirNovo = () => pedir(() => { setEditando(null); setSheetAberto(true); });
+  const abrirEdicao = (p) => pedir(() => { setEditando(p.id); setSheetAberto(true); });
+  const excluir = (id) => pedir(async () => {
+    await excluirProtocoloDb(id);
+    setProtocolos((prev) => prev.filter((p) => p.id !== id));
+  });
 
-  const confirmarNome = () => {
-    if (!nomeInput.trim()) return;
-    localStorage.setItem("cantil_atleta_nome", nomeInput.trim());
-    setAtletaState(nomeInput.trim());
-  };
-  const trocarUsuario = () => {
-    localStorage.removeItem("cantil_atleta_nome");
-    setAtletaState("");
-    setLogs([]);
-  };
-
-  if (!atleta) {
-    return (
-      <div style={{ paddingTop: 30 }}>
-        <div style={{ textAlign: "center", marginBottom: 18 }}>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, color: "#F1EFE9", textTransform: "uppercase" }}>Quem é você?</div>
-          <div style={{ fontSize: 12.5, color: "#71727A", marginTop: 6, padding: "0 10px" }}>
-            Seu nome fica salvo neste aparelho para separar o seu registro do de outros alunos.
-          </div>
-        </div>
-        <Field label="Seu nome">
-          <TextInput value={nomeInput} onChange={(e) => setNomeInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") confirmarNome(); }} placeholder="Ex: Ana Souza" autoFocus />
-        </Field>
-        <PrimaryButton onClick={confirmarNome} style={{ width: "100%" }}>Continuar</PrimaryButton>
-      </div>
-    );
-  }
-
-  const workoutSelecionado = workoutsRecentes.find((w) => w.id === form.workoutId);
-  const blocosDisponiveis = workoutSelecionado ? workoutSelecionado.blocos : [];
-
-  const abrirNovo = () => {
-    setForm({ data: new Date().toISOString().slice(0, 10), workoutId: "", blocoId: "", nivel: "Verde", resultado: "", ajuste: "", notas: "" });
-    setSheetAberto(true);
-  };
-
-  const salvar = async () => {
+  const salvar = async (form) => {
     if (salvando) return;
     setSalvando(true);
-    const bloco = blocosDisponiveis.find((b) => b.id === form.blocoId);
-    const entrada = {
-      atleta, data: form.data, workoutId: form.workoutId || null,
-      workoutNome: workoutSelecionado ? workoutSelecionado.nome : "Treino livre",
-      blocoNome: bloco ? (bloco.titulo || `Workout ${blocosDisponiveis.indexOf(bloco) + 1}`) : "",
-      nivel: form.nivel, resultado: form.resultado, ajuste: form.ajuste, notas: form.notas,
-    };
-    await inserirLogDb(entrada);
+    if (editando) await atualizarProtocoloDb(editando, form);
+    else await inserirProtocoloDb(form);
     setSalvando(false);
     setSheetAberto(false);
-    carregarLogs(atleta);
+    setEditando(null);
+    carregar();
   };
-  const excluir = (id) => pedir(async () => {
-    await excluirLogDb(id);
-    setLogs((prev) => prev.filter((l) => l.id !== id));
-  });
+
+  const compartilhar = async (p) => {
+    const ok = await copyToClipboard(buildShareUrlProtocolo(p.id));
+    onToast(ok ? "Link do protocolo copiado!" : "Não consegui copiar o link");
+  };
+
+  const textoBuscavel = (p) => [p.titulo, p.resumo, p.descricao, p.duracao, p.objetivo, p.tags].filter(Boolean).join(" ").toLowerCase();
+  const buscaAtiva = busca.trim().length > 0;
+  const listaExibida = buscaAtiva ? protocolos.filter((p) => textoBuscavel(p).includes(busca.trim().toLowerCase())) : protocolos;
 
   return (
     <div>
+      <ApresentacaoMetodo apresentacao={apresentacao} setApresentacao={setApresentacao} senha={senha} />
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <div style={{ fontSize: 12, color: "#71727A", display: "flex", alignItems: "center", gap: 5 }}>
-          <Lock size={12} /> {atleta}
-          <button onClick={trocarUsuario} style={{ background: "none", border: "none", color: "#71727A", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, marginLeft: 4, fontSize: 11.5, textDecoration: "underline" }}>
-            <LogOut size={11} /> trocar
-          </button>
+          <Users size={13} /> Visível para todos que usam o site
         </div>
-        <PrimaryButton onClick={abrirNovo}><Plus size={15} /> Registrar</PrimaryButton>
+        <PrimaryButton onClick={abrirNovo}><Plus size={15} /> Novo protocolo</PrimaryButton>
       </div>
       <div style={{ height: 12 }} />
 
-      {carregando ? <Spinner label="Carregando seu log..." /> : (
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
+        <TextInput
+          placeholder="Buscar por título, objetivo, tag, conteúdo..."
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          style={{ paddingLeft: 32 }}
+        />
+      </div>
+
+      {carregando ? (
+        <Spinner label="Carregando protocolos..." />
+      ) : (
         <>
-          <ProgressoTreinos logs={logs} />
-          {logs.length === 0 && <EmptyState text="Nenhum registro ainda. Registre seu resultado e eventuais ajustes/adaptações do treino." />}
-          {logs.map((l) => (
-            <div key={l.id} style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 10, padding: 14, marginBottom: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontSize: 12, color: "#71727A" }}>{l.data}</div>
-                  <div style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14, marginTop: 2 }}>{l.workoutNome}{l.blocoNome && ` — ${l.blocoNome}`}</div>
-                  <div style={{ marginTop: 6 }}><Stamp nome={l.nivel} cor={corDoNivel(l.nivel)} size="sm" /></div>
-                </div>
-                <Trash2 size={15} color="#71727A" style={{ cursor: "pointer" }} onClick={() => excluir(l.id)} />
-              </div>
-              {l.resultado && (
-                <div style={{ marginTop: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 14, color: "#F1EFE9" }}>
-                  <Flag size={12} style={{ display: "inline", marginRight: 5, verticalAlign: -1 }} color="#E4DE00" />{l.resultado}
-                </div>
-              )}
-              {l.ajuste && (
-                <div style={{ marginTop: 8, fontSize: 12.5, color: "#FF8A3D" }}>
-                  <Zap size={12} style={{ display: "inline", marginRight: 5, verticalAlign: -1 }} />Ajuste: {l.ajuste}
-                </div>
-              )}
-              {l.notas && <div style={{ marginTop: 6, fontSize: 12.5, color: "#B9BABF" }}>{l.notas}</div>}
-            </div>
+          {listaExibida.length === 0 && (
+            <EmptyState text={buscaAtiva ? "Nenhum protocolo encontrado para essa busca." : "Nenhum protocolo criado ainda. Toque em 'Novo protocolo'."} />
+          )}
+          {listaExibida.map((p) => (
+            <ProtocoloCard
+              key={p.id}
+              p={p}
+              expandido={expandidoId === p.id}
+              onToggle={() => setExpandidoId(expandidoId === p.id ? null : p.id)}
+              onEditar={abrirEdicao}
+              onExcluir={excluir}
+              onCompartilhar={compartilhar}
+            />
           ))}
         </>
       )}
 
+      {Modal}
+
       {sheetAberto && (
-        <Sheet title="Registrar treino" onClose={() => setSheetAberto(false)}>
-          <Field label="Data">
-            <TextInput type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} />
-          </Field>
-          <Field label="Treino (opcional)">
-            <Select value={form.workoutId} onChange={(e) => setForm({ ...form, workoutId: e.target.value, blocoId: "" })}>
-              <option value="">Treino livre / não listado</option>
-              {workoutsRecentes.map((w) => <option key={w.id} value={w.id}>{w.nome} — {w.data}</option>)}
-            </Select>
-          </Field>
-          {blocosDisponiveis.length > 0 && (
-            <Field label="Bloco / Workout">
-              <Select value={form.blocoId} onChange={(e) => {
-                const b = blocosDisponiveis.find((bl) => bl.id === e.target.value);
-                setForm({ ...form, blocoId: e.target.value, nivel: b ? b.nivel : form.nivel });
-              }}>
-                <option value="">Selecione...</option>
-                {blocosDisponiveis.map((b, i) => <option key={b.id} value={b.id}>Workout {i + 1} {b.titulo && `— ${b.titulo}`}</option>)}
-              </Select>
-            </Field>
-          )}
-          <Field label="Nível executado">
-            <Select value={form.nivel} onChange={(e) => setForm({ ...form, nivel: e.target.value })}>
-              {NIVEIS.map((n) => <option key={n.nome} value={n.nome}>{n.nome}</option>)}
-            </Select>
-            {legendas[form.nivel] && <div style={{ fontSize: 11, color: "#71727A", marginTop: 5 }}>{legendas[form.nivel]}</div>}
-          </Field>
-          <Field label="Resultado (tempo, rounds, peso...)">
-            <TextInput value={form.resultado} onChange={(e) => setForm({ ...form, resultado: e.target.value })} placeholder="Ex: 12:34 / 5 rounds + 10 reps" />
-          </Field>
-          <Field label="Ajuste / adaptação feita">
-            <AutoTextArea value={form.ajuste} onChange={(e) => setForm({ ...form, ajuste: e.target.value })} placeholder="Ex: troquei push press por strict press por causa do ombro" />
-          </Field>
-          <Field label="Notas">
-            <AutoTextArea value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} placeholder="Como se sentiu, observações..." />
-          </Field>
-          <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%", marginTop: 6 }}>
-            <Save size={16} /> {salvando ? "Salvando..." : "Salvar registro"}
-          </PrimaryButton>
+        <Sheet title={editando ? "Editar protocolo" : "Novo protocolo"} onClose={() => { setSheetAberto(false); setEditando(null); }}>
+          <ProtocoloForm
+            inicial={editando ? protocolos.find((p) => p.id === editando) : null}
+            onSalvar={salvar}
+            onCancelar={() => { setSheetAberto(false); setEditando(null); }}
+            salvando={salvando}
+          />
         </Sheet>
       )}
-      {Modal}
     </div>
   );
 }
+
+/* =================================================================
+   TELA SOMENTE-LEITURA DE PROTOCOLO (aberta via link compartilhado)
+================================================================= */
+
+function ViewOnlyProtocolo({ id, onVoltar }) {
+  const [p, setP] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const r = await fetchProtocoloById(id);
+      setP(r);
+      setCarregando(false);
+    })();
+  }, [id]);
+
+  if (!p) {
+    return (
+      <div style={{ background: "#0A0A0A", minHeight: "100vh", padding: 20 }}>
+        <style>{FONT_IMPORT}</style>
+        <div style={{ color: "#9A9A94", textAlign: "center", marginTop: 60, fontSize: 14 }}>
+          {carregando ? "Carregando protocolo..." : "Protocolo não encontrado (o link pode estar errado ou o protocolo foi removido)."}
+        </div>
+        {!carregando && (
+          <GhostButton onClick={onVoltar} style={{ margin: "20px auto 0" }}>
+            <ArrowLeft size={14} /> Ver todos os protocolos
+          </GhostButton>
+        )}
+      </div>
+    );
+  }
+
+  const tags = (p.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
+  return (
+    <div style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif", paddingBottom: 40 }}>
+      <style>{FONT_IMPORT}</style>
+      <div style={{ padding: "20px 16px 10px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: "#E4DE00", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <BookOpen size={18} color="#0A0A0A" />
+        </div>
+        <div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
+          <div style={{ fontSize: 9, color: "#E4DE00", letterSpacing: "0.35em", marginTop: 2 }}>FITNESS</div>
+        </div>
+        <Badge>somente visualização</Badge>
+      </div>
+
+      <div style={{ padding: "16px 16px 0" }}>
+        <div style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 12, padding: 16 }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            {p.titulo || "Protocolo sem título"}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            {p.duracao && <Badge>{p.duracao}</Badge>}
+            {p.objetivo && <Badge>{p.objetivo}</Badge>}
+            {tags.map((t) => <Badge key={t}>{t}</Badge>)}
+          </div>
+          {p.resumo && <div style={{ fontSize: 13, color: "#B9BABF", marginTop: 12, lineHeight: 1.5 }}>{p.resumo}</div>}
+          {p.descricao && <div style={{ fontSize: 13, color: "#D8D8D3", whiteSpace: "pre-wrap", marginTop: 14, lineHeight: 1.5 }}>{p.descricao}</div>}
+        </div>
+        <GhostButton onClick={onVoltar} style={{ width: "100%", marginTop: 16 }}>
+          <ArrowLeft size={14} /> Ver todos os protocolos no site
+        </GhostButton>
+      </div>
+    </div>
+  );
+}
+
 
 /* =================================================================
    TELA SOMENTE-LEITURA (aberta via link compartilhado)
@@ -1721,9 +1793,13 @@ function parseHashWorkoutId() {
   const m = window.location.hash.match(/^#\/w\/(.+)$/);
   return m ? m[1] : null;
 }
+function parseHashProtocoloId() {
+  const m = window.location.hash.match(/^#\/p\/(.+)$/);
+  return m ? m[1] : null;
+}
 
 export default function App() {
-  const [aba, setAba] = useState("workouts");
+  const [aba, setAba] = useState("protocolos");
   const [carregando, setCarregando] = useState(true);
   const [exercicios, setExercicios] = useState([]);
   const [legendas, setLegendas] = useState({});
@@ -1731,11 +1807,15 @@ export default function App() {
   const [senha, setSenha] = useState(SENHA_PADRAO);
   const [toast, setToast] = useState("");
   const [viewOnlyId, setViewOnlyId] = useState(parseHashWorkoutId());
+  const [viewOnlyProtocoloId, setViewOnlyProtocoloId] = useState(parseHashProtocoloId());
 
   const mostrarToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
   useEffect(() => {
-    const onHashChange = () => setViewOnlyId(parseHashWorkoutId());
+    const onHashChange = () => {
+      setViewOnlyId(parseHashWorkoutId());
+      setViewOnlyProtocoloId(parseHashProtocoloId());
+    };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
@@ -1756,11 +1836,19 @@ export default function App() {
   }, []);
 
   if (viewOnlyId) return <ViewOnlyWorkout id={viewOnlyId} legendas={legendas} />;
+  if (viewOnlyProtocoloId) {
+    return (
+      <ViewOnlyProtocolo
+        id={viewOnlyProtocoloId}
+        onVoltar={() => { window.location.hash = ""; setViewOnlyProtocoloId(null); }}
+      />
+    );
+  }
 
   const abas = [
-    { id: "biblioteca", label: "Biblioteca", icon: Dumbbell },
+    { id: "protocolos", label: "Protocolos", icon: BookOpen },
     { id: "workouts", label: "Workouts", icon: ListChecks },
-    { id: "log", label: "Meu log", icon: ClipboardList },
+    { id: "biblioteca", label: "Biblioteca", icon: Dumbbell },
   ];
 
   return (
@@ -1798,7 +1886,7 @@ export default function App() {
                 />
               </>
             )}
-            {aba === "log" && <LogTab legendas={legendas} senha={senha} />}
+            {aba === "protocolos" && <ProtocolosTab senha={senha} onToast={mostrarToast} />}
           </>
         )}
       </div>
