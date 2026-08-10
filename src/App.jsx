@@ -277,15 +277,37 @@ async function removerBannerDb() {
   if (error) console.error(error);
 }
 
-async function fetchApresentacao() {
-  const { data, error } = await supabase.from("apresentacao").select("*").eq("id", 1).maybeSingle();
-  if (error || !data || !data.titulo) { if (error) console.error(error); return null; }
-  return { tag: data.tag || "", titulo: data.titulo || "", descricao: data.descricao || "", atualizadoEm: data.atualizado_em };
+async function fetchApresentacoes() {
+  const { data, error } = await supabase.from("apresentacoes").select("*").order("criado_em", { ascending: true });
+  if (error) { console.error(error); return []; }
+  return data.map((r) => ({
+    id: r.id, tag: r.tag || "", titulo: r.titulo || "", descricao: r.descricao || "",
+    criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
+  }));
 }
-async function salvarApresentacaoDb(ap) {
-  const payload = { id: 1, tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "", atualizado_em: new Date().toISOString() };
-  const { error } = await supabase.from("apresentacao").upsert(payload);
+async function inserirApresentacaoDb(ap) {
+  const agora = new Date().toISOString();
+  const payload = { tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "", criado_em: agora, atualizado_em: agora };
+  const { data, error } = await supabase.from("apresentacoes").insert(payload).select().single();
+  if (error) { console.error(error); return null; }
+  return { id: data.id, tag: data.tag || "", titulo: data.titulo || "", descricao: data.descricao || "", criadoEm: data.criado_em, atualizadoEm: data.atualizado_em };
+}
+async function atualizarApresentacaoDb(id, ap) {
+  const payload = { tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "", atualizado_em: new Date().toISOString() };
+  const { error } = await supabase.from("apresentacoes").update(payload).eq("id", id);
+  if (error) { console.error(error); return false; }
+  return true;
+}
+async function excluirApresentacaoDb(id) {
+  const { error } = await supabase.from("apresentacoes").delete().eq("id", id);
   if (error) console.error(error);
+}
+// Migração de uma vez só: se a tabela antiga (singular, "apresentacao") tiver conteúdo e a nova
+// lista ainda estiver vazia, aproveita o texto antigo como o primeiro bloco da lista nova.
+async function migrarApresentacaoAntiga() {
+  const { data, error } = await supabase.from("apresentacao").select("*").eq("id", 1).maybeSingle();
+  if (error || !data || !data.titulo) return null;
+  return { tag: data.tag || "", titulo: data.titulo || "", descricao: data.descricao || "" };
 }
 
 async function fetchWorkoutOptions() {
@@ -1351,7 +1373,7 @@ function buildShareUrlProtocolo(protocoloId) {
   return `${origin}${pathname}#/p/${protocoloId}`;
 }
 
-function ProtocoloForm({ inicial, onSalvar, onCancelar, salvando }) {
+function ProtocoloForm({ inicial, onSalvar, onCancelar, salvando, erro }) {
   const [form, setForm] = useState(inicial || { titulo: "", resumo: "", duracao: "", objetivo: "", tags: "", descricao: "" });
 
   return (
@@ -1386,6 +1408,7 @@ function ProtocoloForm({ inicial, onSalvar, onCancelar, salvando }) {
           style={{ minHeight: 180 }}
         />
       </Field>
+      {erro && <div style={{ color: "#E6483F", fontSize: 12.5, marginBottom: 12 }}>{erro}</div>}
       <div style={{ display: "flex", gap: 10 }}>
         <GhostButton onClick={onCancelar} style={{ flex: 1 }}>Cancelar</GhostButton>
         <PrimaryButton onClick={() => onSalvar(form)} disabled={salvando} style={{ flex: 1 }}>
@@ -1396,68 +1419,99 @@ function ProtocoloForm({ inicial, onSalvar, onCancelar, salvando }) {
   );
 }
 
-function ApresentacaoMetodo({ apresentacao, setApresentacao, senha }) {
+function BlocoApresentacao({ ap, onEditar, onExcluir }) {
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <span style={{
+          display: "inline-block", background: "#E4DE00", color: "#0A0A0A", fontWeight: 800,
+          fontSize: 11, letterSpacing: "0.08em", padding: "5px 12px", borderRadius: 4, marginBottom: 14,
+          textTransform: "uppercase",
+        }}>
+          {ap.tag || "SOBRE O MÉTODO"}
+        </span>
+        <div style={{ display: "flex", gap: 12, flexShrink: 0, marginTop: 4 }}>
+          <Pencil size={16} color="#71727A" style={{ cursor: "pointer" }} onClick={() => onEditar(ap)} />
+          <Trash2 size={16} color="#71727A" style={{ cursor: "pointer" }} onClick={() => onExcluir(ap.id)} />
+        </div>
+      </div>
+      <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
+        {ap.titulo}
+      </div>
+      {ap.descricao && (
+        <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
+          {ap.descricao}
+        </div>
+      )}
+      <div style={{ height: 1, background: "#26272B", marginTop: 20 }} />
+    </div>
+  );
+}
+
+function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }) {
   const { pedir, Modal } = useSenhaGate(senha);
   const [sheetAberto, setSheetAberto] = useState(false);
+  const [editandoId, setEditandoId] = useState(null);
   const [salvando, setSalvando] = useState(false);
-  const [form, setForm] = useState(apresentacao || { tag: "SOBRE O MÉTODO", titulo: "", descricao: "" });
+  const [erro, setErro] = useState("");
+  const [form, setForm] = useState({ tag: "SOBRE O MÉTODO", titulo: "", descricao: "" });
 
-  const abrirEdicao = () => pedir(() => {
-    setForm(apresentacao || { tag: "SOBRE O MÉTODO", titulo: "", descricao: "" });
+  const abrirNovo = () => pedir(() => {
+    setEditandoId(null);
+    setForm({ tag: "SOBRE O MÉTODO", titulo: "", descricao: "" });
+    setErro("");
     setSheetAberto(true);
+  });
+  const abrirEdicao = (ap) => pedir(() => {
+    setEditandoId(ap.id);
+    setForm(ap);
+    setErro("");
+    setSheetAberto(true);
+  });
+  const excluir = (id) => pedir(async () => {
+    await excluirApresentacaoDb(id);
+    setApresentacoes((prev) => prev.filter((a) => a.id !== id));
   });
 
   const salvar = async () => {
     setSalvando(true);
-    await salvarApresentacaoDb(form);
-    setApresentacao({ ...form, atualizadoEm: new Date().toISOString() });
-    setSalvando(false);
+    setErro("");
+    if (editandoId) {
+      const ok = await atualizarApresentacaoDb(editandoId, form);
+      setSalvando(false);
+      if (!ok) { setErro("Não consegui salvar no banco. Confirme se a tabela \"apresentacoes\" existe no Supabase."); return; }
+      setApresentacoes((prev) => prev.map((a) => (a.id === editandoId ? { ...form, id: editandoId, atualizadoEm: new Date().toISOString() } : a)));
+    } else {
+      const nova = await inserirApresentacaoDb(form);
+      setSalvando(false);
+      if (!nova) { setErro("Não consegui salvar no banco. Confirme se a tabela \"apresentacoes\" existe no Supabase (rode o supabase-schema.sql)."); return; }
+      setApresentacoes((prev) => [...prev, nova]);
+    }
     setSheetAberto(false);
+    if (onToast) onToast("Apresentação salva!");
   };
 
-  const temConteudo = apresentacao && apresentacao.titulo;
-
   return (
-    <div style={{ marginBottom: 22 }}>
-      {temConteudo ? (
-        <div style={{ position: "relative" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <span style={{
-              display: "inline-block", background: "#E4DE00", color: "#0A0A0A", fontWeight: 800,
-              fontSize: 11, letterSpacing: "0.08em", padding: "5px 12px", borderRadius: 4, marginBottom: 14,
-              textTransform: "uppercase",
-            }}>
-              {apresentacao.tag || "SOBRE O MÉTODO"}
-            </span>
-            <Pencil size={16} color="#71727A" style={{ cursor: "pointer", flexShrink: 0, marginTop: 4 }} onClick={abrirEdicao} />
-          </div>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
-            {apresentacao.titulo}
-          </div>
-          {apresentacao.descricao && (
-            <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
-              {apresentacao.descricao}
-            </div>
-          )}
-          <div style={{ height: 1, background: "#26272B", marginTop: 20 }} />
-        </div>
-      ) : (
-        <button
-          onClick={abrirEdicao}
-          style={{
-            width: "100%", background: "none", border: "1px dashed #3A3B40", borderRadius: 10, padding: "14px",
-            color: "#71727A", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center",
-            justifyContent: "center", gap: 6, marginBottom: 8,
-          }}
-        >
-          <Plus size={14} /> Adicionar apresentação do método
-        </button>
-      )}
+    <div>
+      {apresentacoes.map((ap) => (
+        <BlocoApresentacao key={ap.id} ap={ap} onEditar={abrirEdicao} onExcluir={excluir} />
+      ))}
+
+      <button
+        onClick={abrirNovo}
+        style={{
+          width: "100%", background: "none", border: "1px dashed #3A3B40", borderRadius: 10, padding: "14px",
+          color: "#71727A", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center",
+          justifyContent: "center", gap: 6, marginBottom: 22,
+        }}
+      >
+        <Plus size={14} /> Adicionar apresentação do método
+      </button>
 
       {Modal}
 
       {sheetAberto && (
-        <Sheet title="Apresentação do método" onClose={() => setSheetAberto(false)}>
+        <Sheet title={editandoId ? "Editar apresentação" : "Nova apresentação"} onClose={() => setSheetAberto(false)}>
           <Field label="Etiqueta pequena (opcional)">
             <TextInput value={form.tag || ""} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="Ex: SOBRE O MÉTODO" />
           </Field>
@@ -1477,6 +1531,7 @@ function ApresentacaoMetodo({ apresentacao, setApresentacao, senha }) {
               style={{ minHeight: 140 }}
             />
           </Field>
+          {erro && <div style={{ color: "#E6483F", fontSize: 12.5, marginBottom: 12 }}>{erro}</div>}
           <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%" }}>
             <Save size={16} /> {salvando ? "Salvando..." : "Salvar apresentação"}
           </PrimaryButton>
@@ -1555,26 +1610,35 @@ function ProtocoloCard({ p, expandido, onToggle, onEditar, onExcluir, onComparti
 function ProtocolosTab({ senha, onToast }) {
   const [protocolos, setProtocolos] = useState([]);
   const [carregando, setCarregando] = useState(true);
-  const [apresentacao, setApresentacao] = useState(null);
+  const [apresentacoes, setApresentacoes] = useState([]);
   const [busca, setBusca] = useState("");
   const [sheetAberto, setSheetAberto] = useState(false);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
   const [expandidoId, setExpandidoId] = useState(null);
   const { pedir, Modal } = useSenhaGate(senha);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
-    const [rows, apr] = await Promise.all([fetchProtocolos(), fetchApresentacao()]);
-    setProtocolos(rows);
-    setApresentacao(apr);
+    const [rows, protocolosRows] = await Promise.all([fetchApresentacoes(), fetchProtocolos()]);
+    let listaFinal = rows;
+    if (rows.length === 0) {
+      const antiga = await migrarApresentacaoAntiga();
+      if (antiga) {
+        const nova = await inserirApresentacaoDb(antiga);
+        if (nova) listaFinal = [nova];
+      }
+    }
+    setApresentacoes(listaFinal);
+    setProtocolos(protocolosRows);
     setCarregando(false);
   }, []);
 
   useEffect(() => { carregar(); }, [carregar]);
 
-  const abrirNovo = () => pedir(() => { setEditando(null); setSheetAberto(true); });
-  const abrirEdicao = (p) => pedir(() => { setEditando(p.id); setSheetAberto(true); });
+  const abrirNovo = () => pedir(() => { setEditando(null); setErro(""); setSheetAberto(true); });
+  const abrirEdicao = (p) => pedir(() => { setEditando(p.id); setErro(""); setSheetAberto(true); });
   const excluir = (id) => pedir(async () => {
     await excluirProtocoloDb(id);
     setProtocolos((prev) => prev.filter((p) => p.id !== id));
@@ -1583,11 +1647,16 @@ function ProtocolosTab({ senha, onToast }) {
   const salvar = async (form) => {
     if (salvando) return;
     setSalvando(true);
-    if (editando) await atualizarProtocoloDb(editando, form);
-    else await inserirProtocoloDb(form);
+    setErro("");
+    const resultado = editando ? await atualizarProtocoloDb(editando, form) : await inserirProtocoloDb(form);
     setSalvando(false);
+    if (!resultado) {
+      setErro("Não consegui salvar no banco. Confirme se a tabela \"protocolos\" existe no Supabase (rode o supabase-schema.sql) e tente de novo.");
+      return;
+    }
     setSheetAberto(false);
     setEditando(null);
+    if (onToast) onToast("Protocolo salvo!");
     carregar();
   };
 
@@ -1602,7 +1671,7 @@ function ProtocolosTab({ senha, onToast }) {
 
   return (
     <div>
-      <ApresentacaoMetodo apresentacao={apresentacao} setApresentacao={setApresentacao} senha={senha} />
+      <ApresentacoesMetodo apresentacoes={apresentacoes} setApresentacoes={setApresentacoes} senha={senha} onToast={onToast} />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <div style={{ fontSize: 12, color: "#71727A", display: "flex", alignItems: "center", gap: 5 }}>
@@ -1652,6 +1721,7 @@ function ProtocolosTab({ senha, onToast }) {
             onSalvar={salvar}
             onCancelar={() => { setSheetAberto(false); setEditando(null); }}
             salvando={salvando}
+            erro={erro}
           />
         </Sheet>
       )}
