@@ -48,7 +48,9 @@ create table if not exists legendas (
   texto text default ''
 );
 
--- ---------- LOG PESSOAL (execução + ajustes) ----------
+-- ---------- LOG PESSOAL (legado — a versão atual do app não usa mais esta tabela,
+-- a aba "Meu log" virou "Protocolos". Deixei a tabela aqui só pra não apagar
+-- nenhum dado antigo; pode ignorar ou remover manualmente se quiser.) ----------
 create table if not exists logs (
   id uuid primary key default gen_random_uuid(),
   atleta text not null,
@@ -86,6 +88,47 @@ create table if not exists banner (
   constraint banner_singleton check (id = 1)
 );
 
+-- ---------- PROTOCOLOS DE TREINO (aba "Protocolos") ----------
+create table if not exists protocolos (
+  id uuid primary key default gen_random_uuid(),
+  titulo text,
+  resumo text,
+  descricao text,
+  duracao text,
+  objetivo text,
+  tags text default '',
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+create index if not exists idx_protocolos_criado on protocolos (criado_em desc);
+create index if not exists idx_protocolos_titulo_trgm on protocolos using gin (titulo gin_trgm_ops);
+create index if not exists idx_protocolos_tags_trgm on protocolos using gin (tags gin_trgm_ops);
+
+-- ---------- APRESENTAÇÃO DO MÉTODO (legado — formato antigo, um bloco só.
+-- A versão atual do app usa a tabela "apresentacoes" (no plural) logo abaixo,
+-- que permite vários blocos. Deixei essa aqui só pra permitir a migração
+-- automática do conteúdo antigo; pode ignorar.) ----------
+create table if not exists apresentacao (
+  id int primary key default 1,
+  tag text,
+  titulo text,
+  descricao text,
+  atualizado_em timestamptz default now(),
+  constraint apresentacao_singleton check (id = 1)
+);
+
+-- ---------- APRESENTAÇÕES DO MÉTODO (vários blocos hero, estilo "sobre") ----------
+create table if not exists apresentacoes (
+  id uuid primary key default gen_random_uuid(),
+  tag text,
+  titulo text,
+  descricao text,
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+create index if not exists idx_apresentacoes_criado on apresentacoes (criado_em asc);
+
 -- =========================================================
 -- ROW LEVEL SECURITY
 -- Como o app ainda não tem login de usuário, liberamos acesso
@@ -108,23 +151,44 @@ alter table legendas enable row level security;
 alter table logs enable row level security;
 alter table config enable row level security;
 alter table banner enable row level security;
+alter table protocolos enable row level security;
+alter table apresentacao enable row level security;
+alter table apresentacoes enable row level security;
 
+drop policy if exists "anon full access exercicios" on exercicios;
 create policy "anon full access exercicios" on exercicios
   for all using (true) with check (true);
 
+drop policy if exists "anon full access workouts" on workouts;
 create policy "anon full access workouts" on workouts
   for all using (true) with check (true);
 
+drop policy if exists "anon full access legendas" on legendas;
 create policy "anon full access legendas" on legendas
   for all using (true) with check (true);
 
+drop policy if exists "anon full access logs" on logs;
 create policy "anon full access logs" on logs
   for all using (true) with check (true);
 
+drop policy if exists "anon full access config" on config;
 create policy "anon full access config" on config
   for all using (true) with check (true);
 
+drop policy if exists "anon full access banner" on banner;
 create policy "anon full access banner" on banner
+  for all using (true) with check (true);
+
+drop policy if exists "anon full access protocolos" on protocolos;
+create policy "anon full access protocolos" on protocolos
+  for all using (true) with check (true);
+
+drop policy if exists "anon full access apresentacao" on apresentacao;
+create policy "anon full access apresentacao" on apresentacao
+  for all using (true) with check (true);
+
+drop policy if exists "anon full access apresentacoes" on apresentacoes;
+create policy "anon full access apresentacoes" on apresentacoes
   for all using (true) with check (true);
 
 -- Linhas iniciais da legenda (pode editar depois pelo app)
