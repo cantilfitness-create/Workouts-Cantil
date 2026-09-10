@@ -3,7 +3,7 @@ import {
   Dumbbell, ListChecks, Plus, X, Search,
   ChevronDown, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
-  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen
+  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -736,11 +736,99 @@ function blocoVazio() {
   return { id: uid(), titulo: "", nivel: "Verde", formato: FORMATOS[0], timeCap: "", requisitos: "", objetivos: "", conteudo: "", resultado: "", resultadoData: null };
 }
 
+// "Espécie de IA": lê um texto colado e distribui nos campos certos (G-WARM UP, E-WARM UP,
+// SKILL, blocos do WORKOUT com formato/time cap/objetivos/requisitos/conteúdo).
+// É um reconhecimento por padrões de texto (não manda nada pra fora, roda tudo local).
+function interpretarTextoTreino(textoBruto) {
+  const linhas = textoBruto
+    .replace(/[’‘]/g, "'")
+    .replace(/[“”]/g, '"')
+    .split("\n")
+    .map((l) => l.trim());
+
+  const resultado = { warmupGeral: "", warmupEspecifico: "", skill: "", blocos: [] };
+  let modo = null;
+  let blocoAtual = null;
+
+  const limparMarcador = (linha) => linha.replace(/^[-*•·]\s*/, "").trim();
+
+  const finalizarBloco = () => {
+    if (blocoAtual) {
+      blocoAtual.conteudo = blocoAtual.conteudo.trim();
+      blocoAtual.objetivos = blocoAtual.objetivos.trim();
+      blocoAtual.requisitos = blocoAtual.requisitos.trim();
+      resultado.blocos.push(blocoAtual);
+    }
+  };
+
+  for (const linha of linhas) {
+    if (!linha) continue;
+
+    if (/^G[\s-]*WARM[\s-]*UP/i.test(linha)) { modo = "warmupGeral"; continue; }
+    if (/^E[\s-]*WARM[\s-]*UP/i.test(linha)) { modo = "warmupEspecifico"; continue; }
+    if (/^SKILL\b/i.test(linha)) { modo = "skill"; continue; }
+
+    const matchWorkout = linha.match(/^WORKOUT\b\s*(\d*)\s*[-–—:]?\s*(.*)$/i);
+    if (matchWorkout) {
+      finalizarBloco();
+      const resto = matchWorkout[2] || "";
+      const timeCapMatch = resto.match(/(\d+)\s*'|(\d+)\s*min/i);
+      const timeCap = timeCapMatch ? (timeCapMatch[1] ? `${timeCapMatch[1]}'` : `${timeCapMatch[2]}min`) : "";
+      const formatoEncontrado = FORMATOS.find((f) => resto.toUpperCase().includes(f));
+      blocoAtual = {
+        id: uid(), titulo: "", nivel: "Verde",
+        formato: formatoEncontrado || FORMATOS[0],
+        timeCap, requisitos: "", objetivos: "", conteudo: "",
+      };
+      modo = "blocoConteudo";
+      continue;
+    }
+
+    const matchObjetivo = linha.match(/^objetivos?:?\s*(.*)$/i);
+    if (matchObjetivo && blocoAtual) {
+      blocoAtual.objetivos = (blocoAtual.objetivos ? blocoAtual.objetivos + " " : "") + matchObjetivo[1];
+      modo = "blocoConteudo";
+      continue;
+    }
+    const matchRequisitos = linha.match(/^requisitos?:?\s*(.*)$/i);
+    if (matchRequisitos && blocoAtual) {
+      blocoAtual.requisitos = (blocoAtual.requisitos ? blocoAtual.requisitos + " " : "") + matchRequisitos[1];
+      modo = "blocoConteudo";
+      continue;
+    }
+
+    const linhaLimpa = limparMarcador(linha);
+    if (modo === "warmupGeral") resultado.warmupGeral += (resultado.warmupGeral ? "\n" : "") + linhaLimpa;
+    else if (modo === "warmupEspecifico") resultado.warmupEspecifico += (resultado.warmupEspecifico ? "\n" : "") + linhaLimpa;
+    else if (modo === "skill") resultado.skill += (resultado.skill ? "\n" : "") + linhaLimpa;
+    else if (modo === "blocoConteudo" && blocoAtual) blocoAtual.conteudo += (blocoAtual.conteudo ? "\n" : "") + linhaLimpa;
+  }
+  finalizarBloco();
+  return resultado;
+}
+
 function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando }) {
   const [form, setForm] = useState(inicial || {
     nome: "", data: new Date().toISOString().slice(0, 10), categoria: "", tags: "",
     warmupGeral: "", warmupEspecifico: "", skill: "", blocos: [blocoVazio()],
   });
+  const [textoColado, setTextoColado] = useState("");
+  const [colarAberto, setColarAberto] = useState(false);
+  const [avisoDistribuicao, setAvisoDistribuicao] = useState("");
+
+  const distribuirAutomaticamente = () => {
+    if (!textoColado.trim()) return;
+    const resultado = interpretarTextoTreino(textoColado);
+    setForm((f) => ({
+      ...f,
+      warmupGeral: resultado.warmupGeral || f.warmupGeral,
+      warmupEspecifico: resultado.warmupEspecifico || f.warmupEspecifico,
+      skill: resultado.skill || f.skill,
+      blocos: resultado.blocos.length > 0 ? resultado.blocos : f.blocos,
+    }));
+    setAvisoDistribuicao("Preenchido! Revise os campos abaixo e ajuste manualmente o que precisar.");
+    setTimeout(() => setAvisoDistribuicao(""), 4000);
+  };
 
   const atualizarBloco = (id, campo, valor) => setForm({
     ...form,
@@ -756,6 +844,40 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando })
 
   return (
     <div>
+      <div style={{ marginBottom: 18 }}>
+        <button
+          onClick={() => setColarAberto(!colarAberto)}
+          style={{
+            width: "100%", background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 8, padding: "10px 12px",
+            display: "flex", alignItems: "center", justifyContent: "space-between", color: "#B9BABF", fontSize: 13, cursor: "pointer",
+          }}
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <Sparkles size={14} color="#E4DE00" /> Colar treino e preencher automaticamente
+          </span>
+          {colarAberto ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+        {colarAberto && (
+          <div style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderTop: "none", borderRadius: "0 0 8px 8px", padding: 12 }}>
+            <div style={{ fontSize: 11.5, color: "#71727A", marginBottom: 8, lineHeight: 1.4 }}>
+              Cole o treino em texto. Reconheço "G-WARM UP", "E-WARM UP", "SKILL", "WORKOUT" (com formato e time cap tipo "15' AMRAP"), "Objetivo:" e "Requisitos:". Os campos abaixo continuam editáveis pra corrigir ou completar na mão.
+            </div>
+            <AutoTextArea
+              value={textoColado}
+              onChange={(e) => setTextoColado(e.target.value)}
+              placeholder={"Cole aqui o texto completo do treino..."}
+              style={{ minHeight: 140 }}
+            />
+            <PrimaryButton onClick={distribuirAutomaticamente} style={{ width: "100%", marginTop: 8 }}>
+              <Sparkles size={15} /> Distribuir nos campos
+            </PrimaryButton>
+            {avisoDistribuicao && (
+              <div style={{ fontSize: 12, color: "#4CAF6D", marginTop: 8 }}>{avisoDistribuicao}</div>
+            )}
+          </div>
+        )}
+      </div>
+
       <Field label="Nome do treino">
         <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex: Treino de Terça" />
       </Field>
