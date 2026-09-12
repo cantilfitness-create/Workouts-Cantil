@@ -1127,17 +1127,21 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onTogg
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
     <div style={{
-      background: destaque ? "linear-gradient(135deg, rgba(228,222,0,0.10), rgba(228,222,0,0.02))" : "#1A1B1E",
-      border: destaque ? "1px solid rgba(228,222,0,0.5)" : "1px solid #26272B",
+      background: "#1A1B1E",
+      border: destaque ? "1px solid #E4DE00" : "1px solid #26272B",
       borderRadius: 12, marginBottom: 10, overflow: "hidden",
     }}>
+      {destaque && (
+        <div style={{
+          background: "#E4DE00", color: "#0A0A0A", fontWeight: 800, fontSize: 11,
+          letterSpacing: "0.08em", textTransform: "uppercase", padding: "6px 16px",
+          display: "flex", alignItems: "center", gap: 5,
+        }}>
+          <Star size={12} fill="#0A0A0A" /> Destaque
+        </div>
+      )}
       <div style={{ padding: "14px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={onToggle}>
         <div>
-          {destaque && (
-            <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#E4DE00", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-              <Star size={11} fill="#E4DE00" /> Destaque
-            </div>
-          )}
           <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: destaque ? "#FFFFFF" : "#D8D8D3", letterSpacing: "0.03em", textTransform: "uppercase" }}>{w.nome || "Treino sem nome"}</div>
           <div style={{ fontSize: 12, color: "#6B6C72", marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span>{w.data}</span>
@@ -1615,6 +1619,70 @@ function ProtocoloForm({ inicial, onSalvar, onCancelar, salvando, erro }) {
 }
 
 function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo, ehPrimeiro, ehUltimo }) {
+  const controles = (
+    <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "center" }}>
+      <ChevronUp
+        size={17}
+        color={ehPrimeiro ? "#3A3B40" : "#71727A"}
+        style={{ cursor: ehPrimeiro ? "default" : "pointer" }}
+        onClick={() => !ehPrimeiro && onMoverCima(ap.id)}
+      />
+      <ChevronDown
+        size={17}
+        color={ehUltimo ? "#3A3B40" : "#71727A"}
+        style={{ cursor: ehUltimo ? "default" : "pointer" }}
+        onClick={() => !ehUltimo && onMoverBaixo(ap.id)}
+      />
+      <Pencil size={16} color="#71727A" style={{ cursor: "pointer" }} onClick={() => onEditar(ap)} />
+      <Trash2 size={16} color="#71727A" style={{ cursor: "pointer" }} onClick={() => onExcluir(ap.id)} />
+    </div>
+  );
+
+  if (ap.imagemUrl) {
+    return (
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#111" }}>
+          <img
+            src={ap.imagemUrl}
+            alt=""
+            style={{ width: "100%", height: 210, objectFit: "cover", display: "block" }}
+            onError={(e) => { e.target.style.display = "none"; }}
+          />
+          <div style={{
+            position: "absolute", inset: 0,
+            background: "linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.1) 40%, rgba(0,0,0,0.75) 100%)",
+          }} />
+          <div style={{ position: "absolute", top: 12, left: 12, right: 12, display: "flex", justifyContent: "space-between" }}>
+            <span style={{
+              display: "inline-block", background: "#E4DE00", color: "#0A0A0A", fontWeight: 800,
+              fontSize: 11, letterSpacing: "0.08em", padding: "5px 12px", textTransform: "uppercase",
+            }}>
+              {ap.tag || "SOBRE O MÉTODO"}
+            </span>
+            <div style={{ background: "rgba(10,10,10,0.55)", borderRadius: 6, padding: "3px 6px", display: "flex", gap: 8 }}>
+              {controles}
+            </div>
+          </div>
+          <div style={{ position: "absolute", left: 0, bottom: 16, maxWidth: "88%" }}>
+            <span style={{
+              display: "inline-block", background: "#E4DE00", color: "#0A0A0A",
+              fontFamily: "'Anton', sans-serif", fontSize: 22, lineHeight: 1.2,
+              textTransform: "uppercase", padding: "6px 14px 6px 12px",
+            }}>
+              {ap.titulo}
+            </span>
+          </div>
+        </div>
+        {ap.descricao && (
+          <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
+            {ap.descricao}
+          </div>
+        )}
+        <div style={{ height: 1, background: "#26272B", marginTop: 20 }} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ marginBottom: 22 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -1625,44 +1693,16 @@ function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo,
         }}>
           {ap.tag || "SOBRE O MÉTODO"}
         </span>
-        <div style={{ display: "flex", gap: 10, flexShrink: 0, marginTop: 2, alignItems: "center" }}>
-          <ChevronUp
-            size={17}
-            color={ehPrimeiro ? "#3A3B40" : "#71727A"}
-            style={{ cursor: ehPrimeiro ? "default" : "pointer" }}
-            onClick={() => !ehPrimeiro && onMoverCima(ap.id)}
-          />
-          <ChevronDown
-            size={17}
-            color={ehUltimo ? "#3A3B40" : "#71727A"}
-            style={{ cursor: ehUltimo ? "default" : "pointer" }}
-            onClick={() => !ehUltimo && onMoverBaixo(ap.id)}
-          />
-          <Pencil size={16} color="#71727A" style={{ cursor: "pointer" }} onClick={() => onEditar(ap)} />
-          <Trash2 size={16} color="#71727A" style={{ cursor: "pointer" }} onClick={() => onExcluir(ap.id)} />
-        </div>
+        {controles}
       </div>
-
-      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-        {ap.imagemUrl && (
-          <img
-            src={ap.imagemUrl}
-            alt=""
-            style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", flexShrink: 0, marginTop: 4, border: "1px solid #26272B" }}
-            onError={(e) => { e.target.style.display = "none"; }}
-          />
-        )}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
-            {ap.titulo}
-          </div>
-          {ap.descricao && (
-            <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
-              {ap.descricao}
-            </div>
-          )}
-        </div>
+      <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
+        {ap.titulo}
       </div>
+      {ap.descricao && (
+        <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
+          {ap.descricao}
+        </div>
+      )}
       <div style={{ height: 1, background: "#26272B", marginTop: 20 }} />
     </div>
   );
@@ -1683,7 +1723,7 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
     if (!arquivo) return;
     setProcessandoImagem(true);
     try {
-      const dataUrl = await comprimirImagem(arquivo);
+      const dataUrl = await comprimirImagem(arquivo, 800, 0.65);
       setForm((f) => ({ ...f, imagemUrl: dataUrl }));
     } catch (err) {
       console.error(err);
