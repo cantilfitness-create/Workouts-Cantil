@@ -44,6 +44,37 @@ const uid = () =>
     ? crypto.randomUUID()
     : Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
+// Compacta uma foto escolhida no celular: redimensiona pro tamanho máximo e comprime,
+// devolvendo uma imagem pronta pra guardar (sem precisar hospedar em outro lugar).
+function comprimirImagem(file, maxLado = 480, qualidade = 0.75) {
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > maxLado) {
+          height = Math.round((height * maxLado) / width);
+          width = maxLado;
+        } else if (height >= width && height > maxLado) {
+          width = Math.round((width * maxLado) / height);
+          height = maxLado;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", qualidade));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    leitor.onerror = reject;
+    leitor.readAsDataURL(file);
+  });
+}
+
 function buildShareUrl(workoutId) {
   const { origin, pathname } = window.location;
   return `${origin}${pathname}#/w/${workoutId}`;
@@ -1642,8 +1673,23 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
   const [sheetAberto, setSheetAberto] = useState(false);
   const [editandoId, setEditandoId] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [processandoImagem, setProcessandoImagem] = useState(false);
   const [erro, setErro] = useState("");
   const [form, setForm] = useState({ tag: "SOBRE O MÉTODO", titulo: "", descricao: "", imagemUrl: "" });
+
+  const escolherFoto = async (e) => {
+    const arquivo = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!arquivo) return;
+    setProcessandoImagem(true);
+    try {
+      const dataUrl = await comprimirImagem(arquivo);
+      setForm((f) => ({ ...f, imagemUrl: dataUrl }));
+    } catch (err) {
+      console.error(err);
+    }
+    setProcessandoImagem(false);
+  };
 
   const abrirNovo = () => pedir(() => {
     setEditandoId(null);
@@ -1747,24 +1793,30 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
               style={{ minHeight: 140 }}
             />
           </Field>
-          <Field label="Link de uma imagem (opcional, aparece pequena)">
-            <TextInput
-              value={form.imagemUrl || ""}
-              onChange={(e) => setForm({ ...form, imagemUrl: e.target.value })}
-              placeholder="Cole o link de uma imagem já hospedada"
+          <Field label="Foto (opcional, compactada automaticamente)">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={escolherFoto}
+              style={{ color: "#B9BABF", fontSize: 13, width: "100%" }}
             />
-            {form.imagemUrl && (
-              <img
-                src={form.imagemUrl}
-                alt=""
-                style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", marginTop: 8, border: "1px solid #3A3B40" }}
-                onError={(e) => { e.target.style.opacity = "0.2"; }}
-              />
+            {processandoImagem && (
+              <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 6 }}>Compactando imagem...</div>
+            )}
+            {form.imagemUrl && !processandoImagem && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                <img
+                  src={form.imagemUrl}
+                  alt=""
+                  style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", border: "1px solid #3A3B40" }}
+                />
+                <GhostButton onClick={() => setForm({ ...form, imagemUrl: "" })}>Remover foto</GhostButton>
+              </div>
             )}
           </Field>
           {erro && <div style={{ color: "#E6483F", fontSize: 12.5, marginBottom: 12 }}>{erro}</div>}
-          <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%" }}>
-            <Save size={16} /> {salvando ? "Salvando..." : "Salvar apresentação"}
+          <PrimaryButton onClick={salvar} disabled={salvando || processandoImagem} style={{ width: "100%" }}>
+            <Save size={16} /> {salvando ? "Salvando..." : processandoImagem ? "Aguarde a imagem..." : "Salvar apresentação"}
           </PrimaryButton>
         </Sheet>
       )}
