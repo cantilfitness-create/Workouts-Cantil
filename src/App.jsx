@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useContext } from "react";
 import {
   Dumbbell, ListChecks, Plus, X, Search,
-  ChevronDown, ChevronRight, Trash2, Pencil, Timer,
+  ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles
 } from "lucide-react";
@@ -278,25 +278,48 @@ async function removerBannerDb() {
 }
 
 async function fetchApresentacoes() {
-  const { data, error } = await supabase.from("apresentacoes").select("*").order("criado_em", { ascending: true });
+  const { data, error } = await supabase
+    .from("apresentacoes").select("*")
+    .order("ordem", { ascending: true, nullsFirst: false })
+    .order("criado_em", { ascending: true });
   if (error) { console.error(error); return []; }
-  return data.map((r) => ({
+  let rows = data.map((r) => ({
     id: r.id, tag: r.tag || "", titulo: r.titulo || "", descricao: r.descricao || "",
+    imagemUrl: r.imagem_url || "", ordem: r.ordem,
     criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
   }));
+  const semOrdem = rows.some((r) => r.ordem === null || r.ordem === undefined);
+  if (semOrdem) {
+    rows = rows.map((r, i) => ({ ...r, ordem: i }));
+    await Promise.all(rows.map((r) => atualizarOrdemApresentacaoDb(r.id, r.ordem)));
+  }
+  return rows;
 }
-async function inserirApresentacaoDb(ap) {
+async function inserirApresentacaoDb(ap, ordem) {
   const agora = new Date().toISOString();
-  const payload = { tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "", criado_em: agora, atualizado_em: agora };
+  const payload = {
+    tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "",
+    imagem_url: ap.imagemUrl || "", ordem, criado_em: agora, atualizado_em: agora,
+  };
   const { data, error } = await supabase.from("apresentacoes").insert(payload).select().single();
   if (error) { console.error(error); return null; }
-  return { id: data.id, tag: data.tag || "", titulo: data.titulo || "", descricao: data.descricao || "", criadoEm: data.criado_em, atualizadoEm: data.atualizado_em };
+  return {
+    id: data.id, tag: data.tag || "", titulo: data.titulo || "", descricao: data.descricao || "",
+    imagemUrl: data.imagem_url || "", ordem: data.ordem, criadoEm: data.criado_em, atualizadoEm: data.atualizado_em,
+  };
 }
 async function atualizarApresentacaoDb(id, ap) {
-  const payload = { tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "", atualizado_em: new Date().toISOString() };
+  const payload = {
+    tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "",
+    imagem_url: ap.imagemUrl || "", atualizado_em: new Date().toISOString(),
+  };
   const { error } = await supabase.from("apresentacoes").update(payload).eq("id", id);
   if (error) { console.error(error); return false; }
   return true;
+}
+async function atualizarOrdemApresentacaoDb(id, ordem) {
+  const { error } = await supabase.from("apresentacoes").update({ ordem }).eq("id", id);
+  if (error) console.error(error);
 }
 async function excluirApresentacaoDb(id) {
   const { error } = await supabase.from("apresentacoes").delete().eq("id", id);
@@ -417,6 +440,7 @@ function Sheet({ title, onClose, children }) {
   const [alturaVisivel, setAlturaVisivel] = useState(
     typeof window !== "undefined" ? window.innerHeight : 800
   );
+  const scrollRef = useRef(null);
 
   useEffect(() => {
     const vv = window.visualViewport;
@@ -431,6 +455,13 @@ function Sheet({ title, onClose, children }) {
     };
   }, []);
 
+  useEffect(() => {
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    return () => { document.body.style.overflow = original; };
+  }, []);
+
   const rolarCampoParaVisivel = (e) => {
     const alvo = e.target;
     setTimeout(() => {
@@ -443,6 +474,7 @@ function Sheet({ title, onClose, children }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 50, display: "flex", alignItems: "flex-end" }} onClick={onClose}>
       <div
+        ref={scrollRef}
         onClick={(e) => e.stopPropagation()}
         onFocus={rolarCampoParaVisivel}
         style={{
@@ -481,13 +513,22 @@ function Spinner({ label = "Carregando..." }) {
 
 /* ---------------------------- proteção por senha (reutilizável) ---------------------------- */
 
+const DURACAO_SESSAO_MS = 5 * 60 * 1000;
+const SessaoContext = React.createContext({ desbloqueadoAte: 0, estender: () => {} });
+
 function useSenhaGate(senhaCorreta) {
+  const { desbloqueadoAte, estender } = useContext(SessaoContext);
   const [aberto, setAberto] = useState(false);
   const [valor, setValor] = useState("");
   const [erro, setErro] = useState(false);
   const acaoRef = useRef(null);
 
   const pedir = (acao) => {
+    if (Date.now() < desbloqueadoAte) {
+      estender();
+      acao();
+      return;
+    }
     acaoRef.current = acao;
     setValor("");
     setErro(false);
@@ -497,6 +538,7 @@ function useSenhaGate(senhaCorreta) {
   const confirmar = () => {
     if (valor === senhaCorreta) {
       setAberto(false);
+      estender();
       const acao = acaoRef.current;
       acaoRef.current = null;
       setValor("");
@@ -510,7 +552,7 @@ function useSenhaGate(senhaCorreta) {
     <Sheet title="Senha necessária" onClose={() => setAberto(false)}>
       <div style={{ fontSize: 13, color: "#B9BABF", marginBottom: 14, display: "flex", gap: 8, alignItems: "flex-start" }}>
         <Lock size={16} color="#E4DE00" style={{ flexShrink: 0, marginTop: 1 }} />
-        Só quem tem a senha pode fazer essa alteração.
+        Só quem tem a senha pode fazer essa alteração. Depois de digitar, fica liberado por 5 minutos sem precisar digitar de novo.
       </div>
       <Field label="Senha">
         <TextInput
@@ -1541,7 +1583,7 @@ function ProtocoloForm({ inicial, onSalvar, onCancelar, salvando, erro }) {
   );
 }
 
-function BlocoApresentacao({ ap, onEditar, onExcluir }) {
+function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo, ehPrimeiro, ehUltimo }) {
   return (
     <div style={{ marginBottom: 22 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -1552,19 +1594,44 @@ function BlocoApresentacao({ ap, onEditar, onExcluir }) {
         }}>
           {ap.tag || "SOBRE O MÉTODO"}
         </span>
-        <div style={{ display: "flex", gap: 12, flexShrink: 0, marginTop: 4 }}>
+        <div style={{ display: "flex", gap: 10, flexShrink: 0, marginTop: 2, alignItems: "center" }}>
+          <ChevronUp
+            size={17}
+            color={ehPrimeiro ? "#3A3B40" : "#71727A"}
+            style={{ cursor: ehPrimeiro ? "default" : "pointer" }}
+            onClick={() => !ehPrimeiro && onMoverCima(ap.id)}
+          />
+          <ChevronDown
+            size={17}
+            color={ehUltimo ? "#3A3B40" : "#71727A"}
+            style={{ cursor: ehUltimo ? "default" : "pointer" }}
+            onClick={() => !ehUltimo && onMoverBaixo(ap.id)}
+          />
           <Pencil size={16} color="#71727A" style={{ cursor: "pointer" }} onClick={() => onEditar(ap)} />
           <Trash2 size={16} color="#71727A" style={{ cursor: "pointer" }} onClick={() => onExcluir(ap.id)} />
         </div>
       </div>
-      <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
-        {ap.titulo}
-      </div>
-      {ap.descricao && (
-        <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
-          {ap.descricao}
+
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+        {ap.imagemUrl && (
+          <img
+            src={ap.imagemUrl}
+            alt=""
+            style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", flexShrink: 0, marginTop: 4, border: "1px solid #26272B" }}
+            onError={(e) => { e.target.style.display = "none"; }}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
+            {ap.titulo}
+          </div>
+          {ap.descricao && (
+            <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
+              {ap.descricao}
+            </div>
+          )}
         </div>
-      )}
+      </div>
       <div style={{ height: 1, background: "#26272B", marginTop: 20 }} />
     </div>
   );
@@ -1576,11 +1643,11 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
   const [editandoId, setEditandoId] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
-  const [form, setForm] = useState({ tag: "SOBRE O MÉTODO", titulo: "", descricao: "" });
+  const [form, setForm] = useState({ tag: "SOBRE O MÉTODO", titulo: "", descricao: "", imagemUrl: "" });
 
   const abrirNovo = () => pedir(() => {
     setEditandoId(null);
-    setForm({ tag: "SOBRE O MÉTODO", titulo: "", descricao: "" });
+    setForm({ tag: "SOBRE O MÉTODO", titulo: "", descricao: "", imagemUrl: "" });
     setErro("");
     setSheetAberto(true);
   });
@@ -1595,6 +1662,23 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
     setApresentacoes((prev) => prev.filter((a) => a.id !== id));
   });
 
+  const mover = (id, direcao) => pedir(async () => {
+    const idx = apresentacoes.findIndex((a) => a.id === id);
+    const novoIdx = idx + direcao;
+    if (novoIdx < 0 || novoIdx >= apresentacoes.length) return;
+    const atual = apresentacoes[idx];
+    const vizinho = apresentacoes[novoIdx];
+    const novos = [...apresentacoes];
+    novos[idx] = { ...vizinho, ordem: atual.ordem };
+    novos[novoIdx] = { ...atual, ordem: vizinho.ordem };
+    novos.sort((a, b) => a.ordem - b.ordem);
+    setApresentacoes(novos);
+    await Promise.all([
+      atualizarOrdemApresentacaoDb(atual.id, vizinho.ordem),
+      atualizarOrdemApresentacaoDb(vizinho.id, atual.ordem),
+    ]);
+  });
+
   const salvar = async () => {
     setSalvando(true);
     setErro("");
@@ -1602,9 +1686,10 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
       const ok = await atualizarApresentacaoDb(editandoId, form);
       setSalvando(false);
       if (!ok) { setErro("Não consegui salvar no banco. Confirme se a tabela \"apresentacoes\" existe no Supabase."); return; }
-      setApresentacoes((prev) => prev.map((a) => (a.id === editandoId ? { ...form, id: editandoId, atualizadoEm: new Date().toISOString() } : a)));
+      setApresentacoes((prev) => prev.map((a) => (a.id === editandoId ? { ...a, ...form, id: editandoId, atualizadoEm: new Date().toISOString() } : a)));
     } else {
-      const nova = await inserirApresentacaoDb(form);
+      const proximaOrdem = apresentacoes.length > 0 ? Math.max(...apresentacoes.map((a) => a.ordem || 0)) + 1 : 0;
+      const nova = await inserirApresentacaoDb(form, proximaOrdem);
       setSalvando(false);
       if (!nova) { setErro("Não consegui salvar no banco. Confirme se a tabela \"apresentacoes\" existe no Supabase (rode o supabase-schema.sql)."); return; }
       setApresentacoes((prev) => [...prev, nova]);
@@ -1615,8 +1700,17 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
 
   return (
     <div>
-      {apresentacoes.map((ap) => (
-        <BlocoApresentacao key={ap.id} ap={ap} onEditar={abrirEdicao} onExcluir={excluir} />
+      {apresentacoes.map((ap, i) => (
+        <BlocoApresentacao
+          key={ap.id}
+          ap={ap}
+          onEditar={abrirEdicao}
+          onExcluir={excluir}
+          onMoverCima={(id) => mover(id, -1)}
+          onMoverBaixo={(id) => mover(id, 1)}
+          ehPrimeiro={i === 0}
+          ehUltimo={i === apresentacoes.length - 1}
+        />
       ))}
 
       <button
@@ -1652,6 +1746,21 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
               placeholder="Explique sua proposta, filosofia de treino, o que torna o método diferente..."
               style={{ minHeight: 140 }}
             />
+          </Field>
+          <Field label="Link de uma imagem (opcional, aparece pequena)">
+            <TextInput
+              value={form.imagemUrl || ""}
+              onChange={(e) => setForm({ ...form, imagemUrl: e.target.value })}
+              placeholder="Cole o link de uma imagem já hospedada"
+            />
+            {form.imagemUrl && (
+              <img
+                src={form.imagemUrl}
+                alt=""
+                style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", marginTop: 8, border: "1px solid #3A3B40" }}
+                onError={(e) => { e.target.style.opacity = "0.2"; }}
+              />
+            )}
           </Field>
           {erro && <div style={{ color: "#E6483F", fontSize: 12.5, marginBottom: 12 }}>{erro}</div>}
           <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%" }}>
@@ -1748,7 +1857,7 @@ function ProtocolosTab({ senha, onToast }) {
     if (rows.length === 0) {
       const antiga = await migrarApresentacaoAntiga();
       if (antiga) {
-        const nova = await inserirApresentacaoDb(antiga);
+        const nova = await inserirApresentacaoDb(antiga, 0);
         if (nova) listaFinal = [nova];
       }
     }
@@ -1997,6 +2106,8 @@ export default function App() {
   const [legendas, setLegendas] = useState({});
   const [banner, setBanner] = useState(null);
   const [senha, setSenha] = useState(SENHA_PADRAO);
+  const [desbloqueadoAte, setDesbloqueadoAte] = useState(0);
+  const estenderSessao = useCallback(() => setDesbloqueadoAte(Date.now() + DURACAO_SESSAO_MS), []);
   const [toast, setToast] = useState("");
   const [viewOnlyId, setViewOnlyId] = useState(parseHashWorkoutId());
   const [viewOnlyProtocoloId, setViewOnlyProtocoloId] = useState(parseHashProtocoloId());
@@ -2044,6 +2155,7 @@ export default function App() {
   ];
 
   return (
+    <SessaoContext.Provider value={{ desbloqueadoAte, estender: estenderSessao }}>
     <div style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
       <style>{FONT_IMPORT}</style>
 
@@ -2103,5 +2215,6 @@ export default function App() {
         </div>
       </div>
     </div>
+    </SessaoContext.Provider>
   );
 }
