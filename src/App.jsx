@@ -3,7 +3,7 @@ import {
   Dumbbell, ListChecks, Plus, X, Search,
   ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
-  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles
+  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -271,6 +271,40 @@ async function fetchProtocoloById(id) {
   const { data, error } = await supabase.from("protocolos").select("*").eq("id", id).maybeSingle();
   if (error || !data) { if (error) console.error(error); return null; }
   return protocoloFromDb(data);
+}
+
+const DIAS_SEMANA = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"];
+function diasVazios() {
+  return DIAS_SEMANA.map((dia) => ({ dia, protocoloId: "", estrategia: "" }));
+}
+const programacaoFromDb = (r) => ({
+  id: r.id, nome: r.nome || "", destaque: !!r.destaque,
+  dias: Array.isArray(r.dias) && r.dias.length === DIAS_SEMANA.length ? r.dias : diasVazios(),
+  criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
+});
+const programacaoToDb = (p) => ({ nome: p.nome, destaque: !!p.destaque, dias: p.dias });
+
+async function fetchProgramacoes() {
+  const { data, error } = await supabase.from("programacoes_semanais").select("*").order("criado_em", { ascending: false });
+  if (error) { console.error(error); return []; }
+  return data.map(programacaoFromDb);
+}
+async function inserirProgramacaoDb(p) {
+  const agora = new Date().toISOString();
+  const payload = { ...programacaoToDb(p), criado_em: agora, atualizado_em: agora };
+  const { data, error } = await supabase.from("programacoes_semanais").insert(payload).select().single();
+  if (error) { console.error(error); return null; }
+  return programacaoFromDb(data);
+}
+async function atualizarProgramacaoDb(id, p) {
+  const payload = { ...programacaoToDb(p), atualizado_em: new Date().toISOString() };
+  const { data, error } = await supabase.from("programacoes_semanais").update(payload).eq("id", id).select().single();
+  if (error) { console.error(error); return null; }
+  return programacaoFromDb(data);
+}
+async function excluirProgramacaoDb(id) {
+  const { error } = await supabase.from("programacoes_semanais").delete().eq("id", id);
+  if (error) console.error(error);
 }
 
 async function fetchConfig() {
@@ -2053,6 +2087,240 @@ function ProtocolosTab({ senha, onToast }) {
 }
 
 /* =================================================================
+   PROGRAMAÇÃO SEMANAL
+================================================================= */
+
+function ProgramacaoForm({ inicial, protocolos, onSalvar, onCancelar, salvando }) {
+  const [form, setForm] = useState(inicial || { nome: "", destaque: false, dias: diasVazios() });
+
+  const atualizarDia = (idx, campo, valor) => {
+    setForm({ ...form, dias: form.dias.map((d, i) => (i === idx ? { ...d, [campo]: valor } : d)) });
+  };
+
+  return (
+    <div>
+      <Field label="Nome da programação">
+        <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder='Ex: "CT - Fernando"' />
+      </Field>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 18, cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={!!form.destaque}
+          onChange={(e) => setForm({ ...form, destaque: e.target.checked })}
+          style={{ width: 16, height: 16 }}
+        />
+        <span style={{ fontSize: 13, color: "#B9BABF" }}>Destaque (fica visível pra todos, sem pedir senha pra ver os detalhes)</span>
+      </label>
+
+      {form.dias.map((d, i) => (
+        <div key={d.dia} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 13, color: "#E4DE00", marginBottom: 10, letterSpacing: "0.06em" }}>
+            {d.dia}
+          </div>
+          <Field label="Protocolo">
+            <Select value={d.protocoloId} onChange={(e) => atualizarDia(i, "protocoloId", e.target.value)}>
+              <option value="">Selecione um protocolo...</option>
+              {protocolos.map((p) => (
+                <option key={p.id} value={p.id}>{p.titulo || "Protocolo sem título"}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Estratégia">
+            <AutoTextArea
+              value={d.estrategia}
+              onChange={(e) => atualizarDia(i, "estrategia", e.target.value)}
+              placeholder="Observações, foco do dia, ajustes de carga..."
+              style={{ minHeight: 70 }}
+            />
+          </Field>
+        </div>
+      ))}
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <GhostButton onClick={onCancelar} style={{ flex: 1 }}>Cancelar</GhostButton>
+        <PrimaryButton onClick={() => onSalvar(form)} disabled={salvando} style={{ flex: 1 }}>
+          <Save size={16} /> {salvando ? "Salvando..." : "Salvar programação"}
+        </PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onExcluir, senha }) {
+  const { pedir, Modal } = useSenhaGate(senha);
+
+  const alternar = () => {
+    if (expandido || item.destaque) { onToggle(); return; }
+    pedir(() => onToggle());
+  };
+
+  const nomeProtocolo = (id) => (protocolos.find((p) => p.id === id) || {}).titulo || "";
+
+  return (
+    <div style={{
+      background: "#1A1B1E",
+      border: item.destaque ? "1px solid #E4DE00" : "1px solid #26272B",
+      borderRadius: 12, marginBottom: 10, overflow: "hidden",
+    }}>
+      {item.destaque && (
+        <div style={{
+          background: "#E4DE00", color: "#0A0A0A", fontWeight: 800, fontSize: 11,
+          letterSpacing: "0.08em", textTransform: "uppercase", padding: "6px 16px",
+          display: "flex", alignItems: "center", gap: 5,
+        }}>
+          <Star size={12} fill="#0A0A0A" /> Destaque
+        </div>
+      )}
+      <div style={{ padding: "14px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={alternar}>
+        <div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: item.destaque ? "#FFFFFF" : "#D8D8D3", letterSpacing: "0.03em", textTransform: "uppercase" }}>
+            {item.nome || "Programação sem nome"}
+          </div>
+          <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 4, display: "flex", alignItems: "center", gap: 5 }}>
+            {!item.destaque && <Lock size={11} />} {item.destaque ? "Visível pra todos" : "Detalhes protegidos por senha"}
+          </div>
+        </div>
+        {expandido ? <ChevronDown size={18} color="#71727A" /> : <ChevronRight size={18} color="#71727A" />}
+      </div>
+
+      {expandido && (
+        <div style={{ padding: "0 16px 16px", borderTop: "1px solid #2E2F34" }}>
+          {item.dias.map((d) => (
+            <div key={d.dia} style={{ marginTop: 14 }}>
+              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 12.5, color: "#E4DE00", letterSpacing: "0.06em" }}>
+                {d.dia}
+              </div>
+              <div style={{ fontSize: 13, color: d.protocoloId ? "#F1EFE9" : "#5f6066", fontWeight: 700, marginTop: 3 }}>
+                {nomeProtocolo(d.protocoloId) || "Sem protocolo definido"}
+              </div>
+              {d.estrategia && (
+                <div style={{ fontSize: 12.5, color: "#B9BABF", marginTop: 3, whiteSpace: "pre-wrap" }}>{d.estrategia}</div>
+              )}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+            <GhostButton onClick={() => onEditar(item)} style={{ flex: 1 }}><Pencil size={14} /> Editar</GhostButton>
+            <GhostButton onClick={() => onExcluir(item.id)} style={{ flex: 1 }}><Trash2 size={14} /> Excluir</GhostButton>
+          </div>
+        </div>
+      )}
+      {Modal}
+    </div>
+  );
+}
+
+function ProgramacaoSemanalTab({ senha, onToast }) {
+  const [programacoes, setProgramacoes] = useState([]);
+  const [protocolos, setProtocolos] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [busca, setBusca] = useState("");
+  const [sheetAberto, setSheetAberto] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+  const [expandidoId, setExpandidoId] = useState(null);
+  const { pedir, Modal } = useSenhaGate(senha);
+
+  const carregar = useCallback(async () => {
+    setCarregando(true);
+    const [progs, prots] = await Promise.all([fetchProgramacoes(), fetchProtocolos()]);
+    setProgramacoes(progs);
+    setProtocolos(prots);
+    setCarregando(false);
+  }, []);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  const abrirNovo = () => pedir(() => { setEditando(null); setErro(""); setSheetAberto(true); });
+  const abrirEdicao = (item) => pedir(() => { setEditando(item.id); setErro(""); setSheetAberto(true); });
+  const excluir = (id) => pedir(async () => {
+    await excluirProgramacaoDb(id);
+    setProgramacoes((prev) => prev.filter((p) => p.id !== id));
+  });
+
+  const salvar = async (form) => {
+    if (salvando) return;
+    setSalvando(true);
+    setErro("");
+    const resultado = editando ? await atualizarProgramacaoDb(editando, form) : await inserirProgramacaoDb(form);
+    setSalvando(false);
+    if (!resultado) {
+      setErro("Não consegui salvar no banco. Confirme se a tabela \"programacoes_semanais\" existe no Supabase (rode o supabase-schema.sql).");
+      return;
+    }
+    setSheetAberto(false);
+    setEditando(null);
+    if (onToast) onToast("Programação salva!");
+    carregar();
+  };
+
+  const buscaAtiva = busca.trim().length > 0;
+  const filtradas = buscaAtiva
+    ? programacoes.filter((p) => (p.nome || "").toLowerCase().includes(busca.trim().toLowerCase()))
+    : programacoes;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ fontSize: 12, color: "#71727A", display: "flex", alignItems: "center", gap: 5 }}>
+          <Lock size={12} /> Detalhes protegidos por senha
+        </div>
+        <PrimaryButton onClick={abrirNovo}><Plus size={15} /> Nova programação</PrimaryButton>
+      </div>
+      <div style={{ height: 12 }} />
+
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
+        <TextInput
+          placeholder="Buscar por nome..."
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          style={{ paddingLeft: 32 }}
+        />
+      </div>
+
+      {carregando ? (
+        <Spinner label="Carregando programações..." />
+      ) : (
+        <>
+          {filtradas.length === 0 && (
+            <EmptyState text={buscaAtiva ? "Nenhuma programação encontrada." : "Nenhuma programação criada ainda. Toque em 'Nova programação'."} />
+          )}
+          {filtradas.map((item) => (
+            <ProgramacaoCard
+              key={item.id}
+              item={item}
+              protocolos={protocolos}
+              expandido={expandidoId === item.id}
+              onToggle={() => setExpandidoId(expandidoId === item.id ? null : item.id)}
+              onEditar={abrirEdicao}
+              onExcluir={excluir}
+              senha={senha}
+            />
+          ))}
+        </>
+      )}
+
+      {Modal}
+
+      {sheetAberto && (
+        <Sheet title={editando ? "Editar programação" : "Nova programação"} onClose={() => { setSheetAberto(false); setEditando(null); }}>
+          <ProgramacaoForm
+            inicial={editando ? programacoes.find((p) => p.id === editando) : null}
+            protocolos={protocolos}
+            onSalvar={salvar}
+            onCancelar={() => { setSheetAberto(false); setEditando(null); }}
+            salvando={salvando}
+          />
+          {erro && <div style={{ color: "#E6483F", fontSize: 12.5, marginTop: 10 }}>{erro}</div>}
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+/* =================================================================
    TELA SOMENTE-LEITURA DE PROTOCOLO (aberta via link compartilhado)
 ================================================================= */
 
@@ -2243,6 +2511,7 @@ export default function App() {
   const abas = [
     { id: "protocolos", label: "Protocolos", icon: BookOpen },
     { id: "workouts", label: "Workouts", icon: ListChecks },
+    { id: "programacao", label: "Programação", icon: CalendarDays },
     { id: "biblioteca", label: "Biblioteca", icon: Dumbbell },
   ];
 
@@ -2283,6 +2552,7 @@ export default function App() {
               </>
             )}
             {aba === "protocolos" && <ProtocolosTab senha={senha} onToast={mostrarToast} />}
+            {aba === "programacao" && <ProgramacaoSemanalTab senha={senha} onToast={mostrarToast} />}
           </>
         )}
       </div>
