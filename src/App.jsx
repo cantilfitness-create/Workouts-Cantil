@@ -30,6 +30,9 @@ const NIVEIS = [
 ];
 const corDoNivel = (nome) => (NIVEIS.find((n) => n.nome === nome) || NIVEIS[0]).cor;
 
+// Categoria mãe da Biblioteca de exercícios (botões de filtro)
+const NIVEIS_EXERCICIO = ["Básico", "Intermediário", "Avançado"];
+
 const FORMATOS = ["FOR TIME", "AMRAP", "EMOM", "BLOCO", "TABATA", "RX / SCALED"];
 const GRUPOS_SUGERIDOS = [
   "Ginástica", "Levantamento Olímpico", "Levantamento de Força",
@@ -162,11 +165,11 @@ function semanaDoAno(entrada) {
 const exercicioFromDb = (r) => ({
   id: r.id, nome: r.nome || "", grupoGrande: r.grupo_grande || "",
   grupoMenor: r.grupo_menor || "", equipamento: r.equipamento || "", descricao: r.descricao || "",
-  link: r.link || "",
+  link: r.link || "", nivel: r.nivel || "",
 });
 const exercicioToDb = (e) => ({
   nome: e.nome, grupo_grande: e.grupoGrande, grupo_menor: e.grupoMenor,
-  equipamento: e.equipamento, descricao: e.descricao, link: e.link || "",
+  equipamento: e.equipamento, descricao: e.descricao, link: e.link || "", nivel: e.nivel || "",
 });
 
 const workoutFromDb = (r) => ({
@@ -198,13 +201,16 @@ async function fetchExercicios() {
   return data.map(exercicioFromDb);
 }
 async function salvarExercicioDb(exercicio, editandoId) {
-  if (editandoId) {
-    const { error } = await supabase.from("exercicios").update(exercicioToDb(exercicio)).eq("id", editandoId);
-    if (error) console.error(error);
-  } else {
-    const { error } = await supabase.from("exercicios").insert(exercicioToDb(exercicio));
-    if (error) console.error(error);
+  const payload = exercicioToDb(exercicio);
+  const executar = (dados) => (editandoId
+    ? supabase.from("exercicios").update(dados).eq("id", editandoId)
+    : supabase.from("exercicios").insert(dados));
+  let { error } = await executar(payload);
+  if (error) { // coluna "nivel" pode ainda não existir no banco: tenta salvar sem ela
+    const { nivel, ...semNivel } = payload;
+    ({ error } = await executar(semNivel));
   }
+  if (error) console.error(error);
 }
 async function excluirExercicioDb(id) {
   const { error } = await supabase.from("exercicios").delete().eq("id", id);
@@ -610,7 +616,14 @@ const inputStyle = {
   width: "100%", background: "#1C1D20", border: "1px solid #3A3B40", borderRadius: 8, padding: "10px 12px",
   color: "#F1EFE9", fontSize: 14, fontFamily: "'Inter', sans-serif", outline: "none", boxSizing: "border-box",
 };
-function TextInput(props) { return <input {...props} style={{ ...inputStyle, ...(props.style || {}) }} />; }
+const estiloDataHora = {
+  display: "block", minWidth: 0, maxWidth: "100%", minHeight: 44, textAlign: "left",
+  WebkitAppearance: "none", appearance: "none",
+};
+function TextInput(props) {
+  const ehData = props.type === "date" || props.type === "time" || props.type === "datetime-local";
+  return <input {...props} style={{ ...inputStyle, ...(ehData ? estiloDataHora : {}), ...(props.style || {}) }} />;
+}
 function TextArea(props) { return <textarea {...props} style={{ ...inputStyle, resize: "vertical", minHeight: 70, ...(props.style || {}) }} />; }
 function AutoTextArea(props) {
   const ref = useRef(null);
@@ -710,7 +723,7 @@ function Sheet({ title, onClose, children }) {
         onFocus={(e) => { e.stopPropagation(); rolarCampoParaVisivel(e); }}
         style={{
           background: "#212226", width: "100%", maxWidth: 640, margin: "0 auto",
-          maxHeight: Math.round(vp.h * (tecladoAberto ? 0.98 : 0.92)), overflowY: "auto",
+          maxHeight: Math.round(vp.h * (tecladoAberto ? 0.98 : 0.92)), overflowY: "auto", overflowX: "hidden",
           borderRadius: "16px 16px 0 0", padding: `18px 16px ${tecladoAberto ? 160 : 28}px`, borderTop: "3px solid #E4DE00",
         }}
       >
@@ -868,7 +881,8 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const [novaCategoria, setNovaCategoria] = useState(false);
-  const [form, setForm] = useState({ nome: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
+  const [filtroNivel, setFiltroNivel] = useState(""); // "" = Todos
+  const [form, setForm] = useState({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
   const { pedir, Modal } = useSenhaGate(senha);
 
   const categoriasExistentes = Array.from(
@@ -878,7 +892,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const abrirNovo = () => pedir(() => {
     setEditando(null);
     setNovaCategoria(false);
-    setForm({ nome: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
+    setForm({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
     setSheetAberto(true);
   });
   const abrirEdicao = (ex) => pedir(() => { setEditando(ex.id); setNovaCategoria(false); setForm(ex); setSheetAberto(true); });
@@ -901,9 +915,16 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
     recarregar();
   });
 
-  const textoBuscavelEx = (e) => [e.nome, e.grupoGrande, e.grupoMenor, e.equipamento, e.descricao]
+  const textoBuscavelEx = (e) => [e.nome, e.nivel, e.grupoGrande, e.grupoMenor, e.equipamento, e.descricao]
     .filter(Boolean).join(" ").toLowerCase();
-  const filtrados = exercicios.filter((e) => textoBuscavelEx(e).includes(busca.trim().toLowerCase()));
+  const passaNivel = (e) => !filtroNivel || (filtroNivel === "__sem__" ? !e.nivel : e.nivel === filtroNivel);
+  const filtrados = exercicios.filter((e) => passaNivel(e) && textoBuscavelEx(e).includes(busca.trim().toLowerCase()));
+  const temSemNivel = exercicios.some((e) => !e.nivel);
+  const opcoesFiltro = [
+    { id: "", label: "Todos" },
+    ...NIVEIS_EXERCICIO.map((n) => ({ id: n, label: n })),
+    ...(temSemNivel ? [{ id: "__sem__", label: "Sem nível" }] : []),
+  ];
   const grupos = {};
   filtrados.forEach((e) => { const g = e.grupoGrande || "Sem grupo"; grupos[g] = grupos[g] || []; grupos[g].push(e); });
 
@@ -919,11 +940,29 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
         </button>
       </div>
 
-      <div style={{ fontSize: 12, color: "#71727A", marginBottom: 14, display: "flex", alignItems: "center", gap: 5 }}>
-        <Users size={13} /> Visível para todos que usam o site
+      {/* Botões de filtro por categoria mãe */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
+        {opcoesFiltro.map((o) => {
+          const ativo = filtroNivel === o.id;
+          return (
+            <button
+              key={o.id || "todos"}
+              onClick={() => setFiltroNivel(o.id)}
+              style={{
+                flexShrink: 0, background: ativo ? "#E4DE00" : "#1C1D20", color: ativo ? "#0A0A0A" : "#B9BABF",
+                border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}`, borderRadius: 999, padding: "7px 13px",
+                fontSize: 12.5, fontWeight: ativo ? 800 : 600, cursor: "pointer", whiteSpace: "nowrap",
+              }}
+            >
+              {o.label}
+            </button>
+          );
+        })}
       </div>
 
-      {Object.keys(grupos).length === 0 && <EmptyState text="Nenhum exercício ainda. Toque em + para adicionar o primeiro." />}
+      {Object.keys(grupos).length === 0 && (
+        <EmptyState text={exercicios.length === 0 ? "Nenhum exercício ainda. Toque em + para adicionar o primeiro." : "Nenhum exercício encontrado neste filtro."} />
+      )}
 
       {Object.entries(grupos).map(([grupo, lista]) => (
         <Section key={grupo} title={grupo} icon={<Layers size={16} color="#E4DE00" />}>
@@ -933,7 +972,12 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <div style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>{ex.nome}</div>
-                    {ex.grupoMenor && <div style={{ marginTop: 4 }}><Badge>{ex.grupoMenor}</Badge></div>}
+                    {(ex.nivel || ex.grupoMenor) && (
+                      <div style={{ marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {ex.nivel && <Badge>{ex.nivel}</Badge>}
+                        {ex.grupoMenor && <Badge>{ex.grupoMenor}</Badge>}
+                      </div>
+                    )}
                     {ex.equipamento && <div style={{ fontSize: 12, color: "#9A9A94", marginTop: 6 }}>Equip: {ex.equipamento}</div>}
                     {ex.descricao && <div style={{ fontSize: 12.5, color: "#B9BABF", marginTop: 6, lineHeight: 1.4 }}>{ex.descricao}</div>}
                     {ex.link && (
@@ -962,6 +1006,13 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
         <Sheet title={editando ? "Editar exercício" : "Novo exercício"} onClose={() => setSheetAberto(false)}>
           <Field label="Nome do exercício">
             <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex: Snatch" />
+          </Field>
+          <Field label="Nível (categoria mãe)">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {NIVEIS_EXERCICIO.map((n) => (
+                <Chip key={n} ativo={form.nivel === n} onClick={() => setForm({ ...form, nivel: form.nivel === n ? "" : n })}>{n}</Chip>
+              ))}
+            </div>
           </Field>
           <Field label="Grupo grande (categoria)">
             <Select
@@ -1791,7 +1842,8 @@ function ProtocoloForm({ inicial, onSalvar, onCancelar, onExcluir, salvando, err
   return (
     <div>
       <Field label="Ícone (opcional)">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
+        {/* Os ícones quebram para a linha de baixo; pode adicionar mais no futuro sem estourar a tela */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {ICONES_PROTOCOLO.map((ic) => {
             const ativo = form.icone === ic.id;
             return (
@@ -1801,17 +1853,17 @@ function ProtocoloForm({ inicial, onSalvar, onCancelar, onExcluir, salvando, err
                 title={ic.nome}
                 onClick={() => setForm({ ...form, icone: ativo ? "" : ic.id })}
                 style={{
+                  width: 48, height: 48, flexShrink: 0, padding: 5, boxSizing: "border-box", cursor: "pointer",
                   background: ativo ? "#E4DE0033" : "#1C1D20", border: `1.5px solid ${ativo ? "#E4DE00" : "#2E2F34"}`,
-                  borderRadius: 8, padding: 5, aspectRatio: "1 / 1", cursor: "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center",
+                  borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
                 }}
               >
-                <img src={ic.src} alt={ic.nome} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                <img src={ic.src} alt={ic.nome} style={{ width: 36, height: 36, objectFit: "contain", display: "block" }} />
               </button>
             );
           })}
         </div>
-        <div style={{ fontSize: 11.5, color: iconeSel ? "#E4DE00" : "#71727A", marginTop: 6 }}>
+        <div style={{ fontSize: 11.5, lineHeight: 1.4, color: iconeSel ? "#E4DE00" : "#71727A", marginTop: 8 }}>
           {iconeSel ? `${iconeSel.nome} — ${iconeSel.sub} (toque de novo para remover)` : "Toque em um ícone para escolher."}
         </div>
       </Field>
