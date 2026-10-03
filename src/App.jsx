@@ -3,7 +3,8 @@ import {
   Dumbbell, ListChecks, Plus, X, Search,
   ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
-  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays
+  PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
+  ClipboardList
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -406,6 +407,76 @@ async function fetchWorkoutOptions() {
   return data;
 }
 
+/* ---------------------------- avaliação de aptidão física ---------------------------- */
+// Perguntas configuráveis (tabela avaliacao_config). Respostas ficam na tabela avaliacoes,
+// que só é lida/apagada via funções (RPC) que conferem a senha — ver arquivo avaliacao_supabase.sql.
+
+const TIPOS_PERGUNTA = [
+  { id: "texto", label: "Texto curto" },
+  { id: "paragrafo", label: "Texto longo" },
+  { id: "numero", label: "Número" },
+  { id: "data", label: "Data" },
+  { id: "escolha", label: "Escolha única" },
+  { id: "multipla", label: "Múltipla escolha" },
+  { id: "simnao", label: "Sim / Não" },
+  { id: "escala", label: "Escala de 0 a 10" },
+];
+const tipoComOpcoes = (t) => t === "escolha" || t === "multipla";
+
+const PERGUNTAS_PADRAO = [
+  { id: "p1", tipo: "numero", titulo: "Idade", obrigatoria: true, opcoes: [] },
+  { id: "p2", tipo: "numero", titulo: "Peso (kg)", obrigatoria: false, opcoes: [] },
+  { id: "p3", tipo: "numero", titulo: "Altura (cm)", obrigatoria: false, opcoes: [] },
+  { id: "p4", tipo: "escolha", titulo: "Objetivo principal", obrigatoria: true,
+    opcoes: ["Emagrecimento", "Ganho de massa", "Condicionamento", "Saúde e qualidade de vida", "Performance"] },
+  { id: "p5", tipo: "simnao", titulo: "Pratica atividade física atualmente?", obrigatoria: true, opcoes: [] },
+  { id: "p6", tipo: "paragrafo", titulo: "Possui lesão, doença ou restrição médica? Descreva.", obrigatoria: false, opcoes: [] },
+  { id: "p7", tipo: "escala", titulo: "Como você avalia seu condicionamento hoje?", obrigatoria: false, opcoes: [] },
+];
+
+async function fetchAvaliacaoPerguntas() {
+  const { data, error } = await supabase.from("avaliacao_config").select("perguntas").eq("id", 1).maybeSingle();
+  if (error) { console.error(error); return PERGUNTAS_PADRAO; }
+  if (!data || !Array.isArray(data.perguntas)) return PERGUNTAS_PADRAO;
+  return data.perguntas;
+}
+async function salvarAvaliacaoPerguntasDb(senha, perguntas) {
+  const { error } = await supabase.rpc("avaliacao_salvar_perguntas", { p_senha: senha, p_perguntas: perguntas });
+  if (error) console.error(error);
+  return !error;
+}
+// Devolve a data/hora oficial do registro (gerada no servidor), ou null se falhar.
+async function enviarAvaliacaoDb(nome, respostas) {
+  const { data, error } = await supabase.rpc("avaliacao_enviar", { p_nome: nome, p_respostas: respostas });
+  if (error) { console.error(error); return null; }
+  return data;
+}
+async function listarAvaliacoesDb(senha) {
+  const { data, error } = await supabase.rpc("avaliacao_listar", { p_senha: senha });
+  if (error) { console.error(error); return null; }
+  return data || [];
+}
+async function excluirAvaliacaoDb(senha, id) {
+  const { error } = await supabase.rpc("avaliacao_excluir", { p_senha: senha, p_id: id });
+  if (error) console.error(error);
+  return !error;
+}
+function buildShareUrlAvaliacao() {
+  const { origin, pathname } = window.location;
+  return `${origin}${pathname}#/avaliacao`;
+}
+function formatarDataHoraCompleta(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    const data = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return `${data} às ${hora}`;
+  } catch {
+    return "";
+  }
+}
+
 /* ---------------------------- UI primitives ---------------------------- */
 
 function Stamp({ nome, cor, size = "md" }) {
@@ -725,7 +796,15 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
     setSheetAberto(false);
     recarregar();
   };
-  const excluir = (id) => pedir(async () => { await excluirExercicioDb(id); recarregar(); });
+  // Exclusão só existe dentro da tela de edição (que já exige a senha)
+  const excluirDaEdicao = () => pedir(async () => {
+    if (!editando || !window.confirm("Excluir este exercício? Essa ação não pode ser desfeita.")) return;
+    setSalvando(true);
+    await excluirExercicioDb(editando);
+    setSalvando(false);
+    setSheetAberto(false);
+    recarregar();
+  });
 
   const textoBuscavelEx = (e) => [e.nome, e.grupoGrande, e.grupoMenor, e.equipamento, e.descricao]
     .filter(Boolean).join(" ").toLowerCase();
@@ -776,7 +855,6 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
                   </div>
                   <div style={{ display: "flex", gap: 10, flexShrink: 0, marginLeft: 8 }}>
                     <Pencil size={15} color="#71727A" style={{ cursor: "pointer" }} onClick={() => abrirEdicao(ex)} />
-                    <Trash2 size={15} color="#71727A" style={{ cursor: "pointer" }} onClick={() => excluir(ex.id)} />
                   </div>
                 </div>
               </div>
@@ -828,6 +906,11 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
           <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%", marginTop: 6 }}>
             <Save size={16} /> {salvando ? "Salvando..." : "Salvar exercício"}
           </PrimaryButton>
+          {editando && (
+            <GhostButton onClick={excluirDaEdicao} style={{ width: "100%", marginTop: 10, color: "#E6483F", borderColor: "#E6483F55" }}>
+              <Trash2 size={15} /> Excluir exercício
+            </GhostButton>
+          )}
         </Sheet>
       )}
       {Modal}
@@ -2390,6 +2473,312 @@ function ViewOnlyProtocolo({ id, onVoltar }) {
 
 
 /* =================================================================
+   AVALIAÇÃO DE APTIDÃO FÍSICA
+   - AvaliacaoHome: botão na tela inicial + acesso (com senha) a perguntas e respostas
+   - AvaliacaoPage: formulário que o aluno preenche (link #/avaliacao)
+================================================================= */
+
+function Chip({ ativo, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      background: ativo ? "#E4DE00" : "#1C1D20", color: ativo ? "#0A0A0A" : "#B9BABF",
+      border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}`, borderRadius: 999, padding: "8px 14px",
+      fontSize: 13, fontWeight: ativo ? 800 : 500, cursor: "pointer",
+    }}>
+      {children}
+    </button>
+  );
+}
+
+function PerguntaCampo({ p, valor, onChange }) {
+  const wrap = { display: "flex", flexWrap: "wrap", gap: 8 };
+  if (p.tipo === "paragrafo") return <TextArea value={valor || ""} onChange={(e) => onChange(e.target.value)} />;
+  if (p.tipo === "numero") return <TextInput type="number" inputMode="decimal" value={valor || ""} onChange={(e) => onChange(e.target.value)} />;
+  if (p.tipo === "data") return <TextInput type="date" value={valor || ""} onChange={(e) => onChange(e.target.value)} />;
+  if (p.tipo === "escolha") {
+    return (
+      <div style={wrap}>
+        {(p.opcoes || []).map((o) => <Chip key={o} ativo={valor === o} onClick={() => onChange(valor === o ? "" : o)}>{o}</Chip>)}
+      </div>
+    );
+  }
+  if (p.tipo === "multipla") {
+    const atual = Array.isArray(valor) ? valor : [];
+    return (
+      <div style={wrap}>
+        {(p.opcoes || []).map((o) => (
+          <Chip key={o} ativo={atual.includes(o)} onClick={() => onChange(atual.includes(o) ? atual.filter((x) => x !== o) : [...atual, o])}>{o}</Chip>
+        ))}
+      </div>
+    );
+  }
+  if (p.tipo === "simnao") {
+    return (
+      <div style={wrap}>
+        {["Sim", "Não"].map((o) => <Chip key={o} ativo={valor === o} onClick={() => onChange(valor === o ? "" : o)}>{o}</Chip>)}
+      </div>
+    );
+  }
+  if (p.tipo === "escala") {
+    return (
+      <div style={wrap}>
+        {Array.from({ length: 11 }, (_, i) => String(i)).map((o) => (
+          <Chip key={o} ativo={valor === o} onClick={() => onChange(valor === o ? "" : o)}>{o}</Chip>
+        ))}
+      </div>
+    );
+  }
+  return <TextInput value={valor || ""} onChange={(e) => onChange(e.target.value)} />;
+}
+
+const respostaVazia = (v) => v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
+
+function AvaliacaoPage({ onVoltar }) {
+  const [perguntas, setPerguntas] = useState(null);
+  const [nome, setNome] = useState("");
+  const [valores, setValores] = useState({});
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState("");
+  const [enviadoEm, setEnviadoEm] = useState(null);
+
+  useEffect(() => { (async () => setPerguntas(await fetchAvaliacaoPerguntas()))(); }, []);
+
+  const enviar = async () => {
+    if (enviando) return;
+    if (!nome.trim()) { setErro("Informe seu nome completo."); return; }
+    const faltando = perguntas.find((p) => p.obrigatoria && respostaVazia(valores[p.id]));
+    if (faltando) { setErro(`Responda a pergunta obrigatória: ${faltando.titulo}`); return; }
+    setErro("");
+    setEnviando(true);
+    const respostas = perguntas.map((p) => {
+      const v = valores[p.id];
+      return { pergunta: p.titulo, tipo: p.tipo, resposta: Array.isArray(v) ? v.join(", ") : (v || "") };
+    });
+    const quando = await enviarAvaliacaoDb(nome.trim(), respostas);
+    setEnviando(false);
+    if (!quando) { setErro("Não foi possível enviar agora. Verifique sua conexão e tente de novo."); return; }
+    setEnviadoEm(quando);
+  };
+
+  const topo = (
+    <div style={{ padding: "20px 16px 10px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ width: 32, height: 32, borderRadius: 8, background: "#E4DE00", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Dumbbell size={18} color="#0A0A0A" />
+      </div>
+      <div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
+        <div style={{ fontSize: 9, color: "#E4DE00", letterSpacing: "0.35em", marginTop: 2 }}>FITNESS</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif", paddingBottom: 40 }}>
+      <style>{FONT_IMPORT}</style>
+      {topo}
+      <div style={{ padding: "16px 16px 0", maxWidth: 640, margin: "0 auto" }}>
+        {enviadoEm ? (
+          <div style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 12, padding: 24, textAlign: "center" }}>
+            <div style={{ width: 56, height: 56, borderRadius: 28, background: "#4CAF6D22", border: "2px solid #4CAF6D", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+              <Check size={30} color="#4CAF6D" />
+            </div>
+            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>Avaliação enviada!</div>
+            <div style={{ fontSize: 13.5, color: "#B9BABF", marginTop: 10, lineHeight: 1.5 }}>
+              Obrigado, {nome.trim().split(" ")[0]}. Recebemos suas respostas.
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <Badge>Registrada em {formatarDataHoraCompleta(enviadoEm)}</Badge>
+            </div>
+            <GhostButton onClick={onVoltar} style={{ width: "100%", marginTop: 20 }}><ArrowLeft size={14} /> Voltar ao site</GhostButton>
+          </div>
+        ) : !perguntas ? (
+          <Spinner />
+        ) : (
+          <div style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 12, padding: 16 }}>
+            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>Avaliação de aptidão física</div>
+            <div style={{ fontSize: 12.5, color: "#71727A", margin: "6px 0 16px" }}>Responda com atenção. Campos com * são obrigatórios.</div>
+            <Field label="Nome completo *">
+              <TextInput value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome" />
+            </Field>
+            {perguntas.map((p) => (
+              <Field key={p.id} label={`${p.titulo}${p.obrigatoria ? " *" : ""}`}>
+                <PerguntaCampo p={p} valor={valores[p.id]} onChange={(v) => setValores({ ...valores, [p.id]: v })} />
+              </Field>
+            ))}
+            {erro && <div style={{ color: "#E6483F", fontSize: 12.5, marginBottom: 12 }}>{erro}</div>}
+            <PrimaryButton onClick={enviar} disabled={enviando} style={{ width: "100%", marginTop: 6 }}>
+              <Check size={16} /> {enviando ? "Enviando..." : "Enviar avaliação"}
+            </PrimaryButton>
+          </div>
+        )}
+        {!enviadoEm && <GhostButton onClick={onVoltar} style={{ width: "100%", marginTop: 16 }}><ArrowLeft size={14} /> Voltar ao site</GhostButton>}
+      </div>
+    </div>
+  );
+}
+
+function AvaliacaoHome({ senha, onToast }) {
+  const { pedir, Modal } = useSenhaGate(senha);
+  const [cfgAberto, setCfgAberto] = useState(false);
+  const [perguntasEdit, setPerguntasEdit] = useState([]);
+  const [salvando, setSalvando] = useState(false);
+  const [respAberto, setRespAberto] = useState(false);
+  const [lista, setLista] = useState(null);
+  const [expandido, setExpandido] = useState(null);
+
+  const abrirConfig = () => pedir(async () => {
+    setPerguntasEdit(await fetchAvaliacaoPerguntas());
+    setCfgAberto(true);
+  });
+  const carregarLista = async () => {
+    const r = await listarAvaliacoesDb(senha);
+    if (r === null) { onToast("Não foi possível carregar as respostas"); setRespAberto(false); return; }
+    setLista(r);
+  };
+  const abrirRespostas = () => pedir(async () => {
+    setLista(null);
+    setExpandido(null);
+    setRespAberto(true);
+    carregarLista();
+  });
+
+  const atualizar = (id, campo, valor) => setPerguntasEdit((ps) => ps.map((p) => (p.id === id ? { ...p, [campo]: valor } : p)));
+  const mover = (i, dir) => setPerguntasEdit((ps) => {
+    const j = i + dir;
+    if (j < 0 || j >= ps.length) return ps;
+    const c = [...ps];
+    [c[i], c[j]] = [c[j], c[i]];
+    return c;
+  });
+  const remover = (id) => setPerguntasEdit((ps) => ps.filter((p) => p.id !== id));
+  const adicionar = () => setPerguntasEdit((ps) => [...ps, { id: uid(), tipo: "texto", titulo: "", obrigatoria: false, opcoes: [] }]);
+
+  const salvarConfig = () => pedir(async () => {
+    if (salvando) return;
+    const limpas = perguntasEdit
+      .filter((p) => p.titulo.trim())
+      .map((p) => ({
+        id: p.id, tipo: p.tipo, titulo: p.titulo.trim(), obrigatoria: !!p.obrigatoria,
+        opcoes: tipoComOpcoes(p.tipo) ? (p.opcoes || []).map((o) => o.trim()).filter(Boolean) : [],
+      }));
+    setSalvando(true);
+    const ok = await salvarAvaliacaoPerguntasDb(senha, limpas);
+    setSalvando(false);
+    if (ok) { setCfgAberto(false); onToast("Perguntas salvas"); } else onToast("Erro ao salvar as perguntas");
+  });
+
+  const excluirResposta = (item) => pedir(async () => {
+    if (!window.confirm(`Excluir a avaliação de ${item.nome}? Essa ação não pode ser desfeita.`)) return;
+    const ok = await excluirAvaliacaoDb(senha, item.id);
+    if (ok) { setLista((l) => l.filter((x) => x.id !== item.id)); onToast("Avaliação excluída"); } else onToast("Erro ao excluir");
+  });
+
+  const miniBtn = { flex: 1, fontSize: 12.5, padding: "9px 8px" };
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <button onClick={() => { window.location.hash = "#/avaliacao"; }} style={{
+        width: "100%", background: "#E4DE00", color: "#0A0A0A", border: "none", borderRadius: 12, padding: "16px 14px",
+        display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left",
+      }}>
+        <ClipboardList size={28} />
+        <div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 17, letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.1 }}>Avaliação de aptidão física</div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3 }}>Toque para preencher o formulário</div>
+        </div>
+        <ChevronRight size={22} style={{ marginLeft: "auto" }} />
+      </button>
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <GhostButton onClick={abrirConfig} style={miniBtn}><Lock size={12} /> Perguntas</GhostButton>
+        <GhostButton onClick={abrirRespostas} style={miniBtn}><Lock size={12} /> Respostas</GhostButton>
+        <GhostButton onClick={async () => onToast((await copyToClipboard(buildShareUrlAvaliacao())) ? "Link copiado" : "Não foi possível copiar")} style={miniBtn}>
+          <Share2 size={12} /> Link
+        </GhostButton>
+      </div>
+
+      {cfgAberto && (
+        <Sheet title="Perguntas da avaliação" onClose={() => setCfgAberto(false)}>
+          <div style={{ fontSize: 12.5, color: "#9A9A94", marginBottom: 14, lineHeight: 1.45 }}>
+            O campo "Nome completo" já vem fixo no formulário. Monte abaixo as demais perguntas.
+          </div>
+          {perguntasEdit.map((p, i) => (
+            <div key={p.id} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <Badge>Pergunta {i + 1}</Badge>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <ChevronUp size={18} color="#71727A" style={{ cursor: "pointer" }} onClick={() => mover(i, -1)} />
+                  <ChevronDown size={18} color="#71727A" style={{ cursor: "pointer" }} onClick={() => mover(i, 1)} />
+                  <Trash2 size={16} color="#E6483F" style={{ cursor: "pointer" }} onClick={() => remover(p.id)} />
+                </div>
+              </div>
+              <Field label="Pergunta">
+                <TextInput value={p.titulo} onChange={(e) => atualizar(p.id, "titulo", e.target.value)} placeholder="Ex: Você fuma?" />
+              </Field>
+              <Field label="Formato da resposta">
+                <Select value={p.tipo} onChange={(e) => atualizar(p.id, "tipo", e.target.value)}>
+                  {TIPOS_PERGUNTA.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </Select>
+              </Field>
+              {tipoComOpcoes(p.tipo) && (
+                <Field label="Opções (uma por linha)">
+                  <TextArea value={(p.opcoes || []).join("\n")} onChange={(e) => atualizar(p.id, "opcoes", e.target.value.split("\n"))} placeholder={"Opção 1\nOpção 2"} />
+                </Field>
+              )}
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#B9BABF", cursor: "pointer" }}>
+                <input type="checkbox" checked={!!p.obrigatoria} onChange={(e) => atualizar(p.id, "obrigatoria", e.target.checked)} />
+                Resposta obrigatória
+              </label>
+            </div>
+          ))}
+          <GhostButton onClick={adicionar} style={{ width: "100%", marginBottom: 12 }}><Plus size={15} /> Adicionar pergunta</GhostButton>
+          <PrimaryButton onClick={salvarConfig} disabled={salvando} style={{ width: "100%" }}>
+            <Save size={16} /> {salvando ? "Salvando..." : "Salvar perguntas"}
+          </PrimaryButton>
+        </Sheet>
+      )}
+
+      {respAberto && (
+        <Sheet title={`Respostas${lista ? ` (${lista.length})` : ""}`} onClose={() => setRespAberto(false)}>
+          {!lista ? <Spinner /> : lista.length === 0 ? <EmptyState text="Nenhuma avaliação enviada ainda." /> : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {lista.map((item) => {
+                const aberto = expandido === item.id;
+                return (
+                  <div key={item.id} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: "12px 14px" }}>
+                    <div onClick={() => setExpandido(aberto ? null : item.id)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", gap: 8 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>{item.nome}</div>
+                        <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 3 }}>{formatarDataHoraCompleta(item.enviado_em)}</div>
+                      </div>
+                      {aberto ? <ChevronUp size={18} color="#71727A" /> : <ChevronDown size={18} color="#71727A" />}
+                    </div>
+                    {aberto && (
+                      <div style={{ marginTop: 12, borderTop: "1px solid #2E2F34", paddingTop: 10 }}>
+                        {(item.respostas || []).map((r, i) => (
+                          <div key={i} style={{ marginBottom: 10 }}>
+                            <div style={{ fontSize: 11.5, color: "#9A9A94" }}>{r.pergunta}</div>
+                            <div style={{ fontSize: 13.5, color: "#F1EFE9", marginTop: 2, whiteSpace: "pre-wrap" }}>{r.resposta || "—"}</div>
+                          </div>
+                        ))}
+                        <GhostButton onClick={() => excluirResposta(item)} style={{ width: "100%", marginTop: 4, color: "#E6483F", borderColor: "#E6483F55" }}>
+                          <Trash2 size={14} /> Excluir avaliação
+                        </GhostButton>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Sheet>
+      )}
+      {Modal}
+    </div>
+  );
+}
+
+
+/* =================================================================
    TELA SOMENTE-LEITURA (aberta via link compartilhado)
 ================================================================= */
 
@@ -2454,6 +2843,9 @@ function parseHashWorkoutId() {
   const m = window.location.hash.match(/^#\/w\/(.+)$/);
   return m ? m[1] : null;
 }
+function parseHashAvaliacao() {
+  return window.location.hash === "#/avaliacao";
+}
 function parseHashProtocoloId() {
   const m = window.location.hash.match(/^#\/p\/(.+)$/);
   return m ? m[1] : null;
@@ -2471,6 +2863,7 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [viewOnlyId, setViewOnlyId] = useState(parseHashWorkoutId());
   const [viewOnlyProtocoloId, setViewOnlyProtocoloId] = useState(parseHashProtocoloId());
+  const [viewAvaliacao, setViewAvaliacao] = useState(parseHashAvaliacao());
 
   const mostrarToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
@@ -2478,6 +2871,7 @@ export default function App() {
     const onHashChange = () => {
       setViewOnlyId(parseHashWorkoutId());
       setViewOnlyProtocoloId(parseHashProtocoloId());
+      setViewAvaliacao(parseHashAvaliacao());
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -2498,6 +2892,7 @@ export default function App() {
     })();
   }, []);
 
+  if (viewAvaliacao) return <AvaliacaoPage onVoltar={() => { window.location.hash = ""; setViewAvaliacao(false); }} />;
   if (viewOnlyId) return <ViewOnlyWorkout id={viewOnlyId} legendas={legendas} />;
   if (viewOnlyProtocoloId) {
     return (
@@ -2551,7 +2946,12 @@ export default function App() {
                 />
               </>
             )}
-            {aba === "protocolos" && <ProtocolosTab senha={senha} onToast={mostrarToast} />}
+            {aba === "protocolos" && (
+              <>
+                <AvaliacaoHome senha={senha} onToast={mostrarToast} />
+                <ProtocolosTab senha={senha} onToast={mostrarToast} />
+              </>
+            )}
             {aba === "programacao" && <ProgramacaoSemanalTab senha={senha} onToast={mostrarToast} />}
           </>
         )}
