@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useContext } from "react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useContext } from "react";
 import {
   Dumbbell, ListChecks, Plus, X, Search,
   ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
@@ -176,11 +176,13 @@ const workoutFromDb = (r) => ({
   id: r.id, codigo: r.codigo || "", nome: r.nome || "", data: r.data, categoria: r.categoria || "",
   tags: r.tags || "", warmupGeral: r.warmup_geral || "", warmupEspecifico: r.warmup_especifico || "",
   skill: r.skill || "", blocos: r.blocos && r.blocos.length ? r.blocos : [blocoVazio()],
+  protocoloId: r.protocolo_id || "",
   criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
 });
 const workoutToDb = (w) => ({
-  codigo: w.codigo, nome: w.nome, data: w.data, categoria: w.categoria, tags: w.tags || "",
+  codigo: w.codigo, nome: w.nome, data: w.data, categoria: w.categoria || "", tags: w.tags || "",
   warmup_geral: w.warmupGeral, warmup_especifico: w.warmupEspecifico, skill: w.skill, blocos: w.blocos,
+  protocolo_id: w.protocoloId || "",
 });
 
 const protocoloFromDb = (r) => ({
@@ -281,14 +283,22 @@ async function inserirWorkoutDb(w) {
   const agora = new Date().toISOString();
   const codigo = await gerarCodigoTreino(w.data);
   const payload = { ...workoutToDb(w), codigo, criado_em: agora, atualizado_em: agora };
-  const { data, error } = await supabase.from("workouts").insert(payload).select().single();
+  let { data, error } = await supabase.from("workouts").insert(payload).select().single();
+  if (error) { // coluna "protocolo_id" pode ainda não existir: tenta salvar sem ela
+    const { protocolo_id, ...semProtocolo } = payload;
+    ({ data, error } = await supabase.from("workouts").insert(semProtocolo).select().single());
+  }
   if (error) { console.error(error); return null; }
   return workoutFromDb(data);
 }
 async function atualizarWorkoutDb(id, w) {
   const agora = new Date().toISOString();
   const payload = { ...workoutToDb(w), atualizado_em: agora };
-  const { data, error } = await supabase.from("workouts").update(payload).eq("id", id).select().single();
+  let { data, error } = await supabase.from("workouts").update(payload).eq("id", id).select().single();
+  if (error) { // coluna "protocolo_id" pode ainda não existir: tenta salvar sem ela
+    const { protocolo_id, ...semProtocolo } = payload;
+    ({ data, error } = await supabase.from("workouts").update(semProtocolo).eq("id", id).select().single());
+  }
   if (error) { console.error(error); return null; }
   return workoutFromDb(data);
 }
@@ -627,17 +637,24 @@ function TextInput(props) {
 function TextArea(props) { return <textarea {...props} style={{ ...inputStyle, resize: "vertical", minHeight: 70, ...(props.style || {}) }} />; }
 function AutoTextArea(props) {
   const ref = useRef(null);
-  useEffect(() => {
+  // useLayoutEffect: ajusta a altura ANTES de a tela ser desenhada (sem piscar)
+  // e devolve a rolagem do contêiner para o mesmo lugar (evita o cursor desalinhado no iPhone).
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    let pai = el.parentElement;
+    while (pai && !(pai.scrollHeight > pai.clientHeight && /(auto|scroll)/.test(getComputedStyle(pai).overflowY))) pai = pai.parentElement;
+    const topo = pai ? pai.scrollTop : 0;
     el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    const novaAltura = `${el.scrollHeight}px`;
+    el.style.height = novaAltura;
+    if (pai) pai.scrollTop = topo;
   }, [props.value]);
   return (
     <textarea
       {...props}
       ref={ref}
-      style={{ ...inputStyle, resize: "vertical", minHeight: 88, overflow: "hidden", lineHeight: 1.5, ...(props.style || {}) }}
+      style={{ ...inputStyle, resize: "none", minHeight: 88, overflow: "hidden", lineHeight: 1.5, ...(props.style || {}) }}
     />
   );
 }
@@ -667,12 +684,14 @@ function GhostButton({ children, onClick, style }) {
   );
 }
 // Rola o campo focado para o meio da área visível (evita o campo ficar escondido atrás do teclado)
+// Textos longos (textarea) NÃO são centralizados: o próprio iPhone já mantém o cursor visível,
+// e mexer na rolagem enquanto digita deixava o cursor em um lugar e o texto em outro.
 function rolarCampoParaVisivel(e) {
   const alvo = e.target;
-  if (!alvo || !/^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName)) return;
-  if (alvo.type === "checkbox" || alvo.type === "radio") return;
+  if (!alvo || !/^(INPUT|SELECT)$/.test(alvo.tagName)) return;
+  if (alvo.type === "checkbox" || alvo.type === "radio" || alvo.type === "file") return;
   setTimeout(() => {
-    if (alvo.scrollIntoView) alvo.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (document.activeElement === alvo && alvo.scrollIntoView) alvo.scrollIntoView({ block: "center" });
   }, 350);
 }
 
@@ -687,12 +706,11 @@ function Sheet({ title, onClose, children }) {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    // Só acompanha a área visível (teclado abrindo/fechando). Não mexe na rolagem enquanto digita.
     const atualizar = () => {
-      setVp({ h: vv.height, top: vv.offsetTop });
-      const ativo = document.activeElement;
-      if (scrollRef.current && ativo && scrollRef.current.contains(ativo) && /^(INPUT|TEXTAREA|SELECT)$/.test(ativo.tagName)) {
-        setTimeout(() => ativo.scrollIntoView({ block: "center", behavior: "smooth" }), 120);
-      }
+      const h = Math.round(vv.height);
+      const top = Math.round(vv.offsetTop);
+      setVp((antes) => (antes.h === h && antes.top === top ? antes : { h, top }));
     };
     atualizar();
     vv.addEventListener("resize", atualizar);
@@ -1143,9 +1161,9 @@ function interpretarTextoTreino(textoBruto) {
   return resultado;
 }
 
-function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando }) {
+function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, protocolos = [] }) {
   const [form, setForm] = useState(inicial || {
-    nome: "", data: new Date().toISOString().slice(0, 10), categoria: "", tags: "",
+    nome: "", data: new Date().toISOString().slice(0, 10), categoria: "", protocoloId: "", tags: "",
     warmupGeral: "", warmupEspecifico: "", skill: "", blocos: [blocoVazio()],
   });
   const [textoColado, setTextoColado] = useState("");
@@ -1217,14 +1235,15 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando })
       <Field label="Nome do treino">
         <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex: Treino de Terça" />
       </Field>
-      <div style={{ display: "flex", gap: 10 }}>
-        <Field label="Data">
-          <TextInput type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} />
-        </Field>
-        <Field label="Categoria">
-          <TextInput value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })} placeholder="Ex: Força" />
-        </Field>
-      </div>
+      <Field label="Data">
+        <TextInput type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} />
+      </Field>
+      <Field label="Protocolo (opcional)">
+        <Select value={form.protocoloId || ""} onChange={(e) => setForm({ ...form, protocoloId: e.target.value })}>
+          <option value="">Nenhum protocolo</option>
+          {protocolos.map((pr) => <option key={pr.id} value={pr.id}>{pr.titulo || "Protocolo sem título"}</option>)}
+        </Select>
+      </Field>
       <Field label="Tags / palavras-chave">
         <TextInput value={form.tags || ""} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder="Ex: força, superior, halteres (separe por vírgula)" />
       </Field>
@@ -1386,7 +1405,18 @@ function WorkoutDetalhes({ w, legendas = {} }) {
   );
 }
 
-function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onToggle, legendas, destaque, senha }) {
+// Selo compacto: ícone + nome do protocolo do treino
+function SeloProtocolo({ protocolo }) {
+  if (!protocolo) return null;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: "#E4DE00" }}>
+      {protocolo.icone && <IconeProtocolo id={protocolo.icone} size={18} />}
+      {protocolo.titulo || "Protocolo"}
+    </span>
+  );
+}
+
+function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onToggle, legendas, destaque, senha, protocolo }) {
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
     <div style={{
@@ -1409,7 +1439,7 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onTogg
           <div style={{ fontSize: 12, color: "#6B6C72", marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span>{w.data}</span>
             {w.codigo && <Badge>#{w.codigo}</Badge>}
-            {w.categoria && <Badge>{w.categoria}</Badge>}
+            <SeloProtocolo protocolo={protocolo} />
           </div>
           {tags.length > 0 && <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>{tags.map((t) => <Badge key={t}>{t}</Badge>)}</div>}
           <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
@@ -1653,8 +1683,20 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const [editando, setEditando] = useState(null);
   const [salvandoTreino, setSalvandoTreino] = useState(false);
   const [expandidoId, setExpandidoId] = useState(null);
+  const [protocolos, setProtocolos] = useState([]);
+  const [treinoDestaque, setTreinoDestaque] = useState(null);
   const debounceRef = useRef(null);
   const { pedir, Modal } = useSenhaGate(senha);
+
+  useEffect(() => { (async () => setProtocolos(await fetchProtocolos()))(); }, []);
+
+  // O treino em destaque fica sempre no topo da lista, mesmo que seja antigo,
+  // e pode ser aberto (com resultados) por qualquer pessoa, sem senha.
+  const carregarDestaque = useCallback(async () => {
+    if (!bannerWorkoutId) { setTreinoDestaque(null); return; }
+    setTreinoDestaque(await fetchWorkoutById(bannerWorkoutId));
+  }, [bannerWorkoutId]);
+  useEffect(() => { carregarDestaque(); }, [carregarDestaque]);
 
   const carregarRecentes = useCallback(async () => {
     setCarregandoRecentes(true);
@@ -1701,6 +1743,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
 
   const recarregarTudo = async () => {
     await carregarRecentes();
+    await carregarDestaque();
     if (modoTodos) await carregarPrimeiraPagina();
     if (busca.trim()) {
       const rows = await searchWorkoutsDb(busca.trim());
@@ -1725,6 +1768,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const excluir = (id) => pedir(async () => {
     await excluirWorkoutDb(id);
     setWorkouts((prev) => prev.filter((w) => w.id !== id));
+    setTreinoDestaque((prev) => (prev && prev.id === id ? null : prev));
     setRecentes((prev) => prev.filter((w) => w.id !== id));
     setResultadosBusca((prev) => prev.filter((w) => w.id !== id));
     setTotalGeral((prev) => Math.max(0, prev - 1));
@@ -1735,9 +1779,12 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     onToast(ok ? "Link do treino copiado!" : "Não consegui copiar o link");
   };
 
-  const listaExibida = buscaAtiva ? resultadosBusca : (modoTodos ? workouts : recentes);
+  const listaBase = buscaAtiva ? resultadosBusca : (modoTodos ? workouts : recentes);
+  const listaExibida = !buscaAtiva && treinoDestaque
+    ? [treinoDestaque, ...listaBase.filter((x) => x.id !== treinoDestaque.id)]
+    : listaBase;
   const carregandoLista = buscaAtiva ? false : (modoTodos ? carregando : carregandoRecentes);
-  const treinoEmEdicao = [...recentes, ...workouts, ...resultadosBusca].find((w) => w.id === editando);
+  const treinoEmEdicao = [...recentes, ...workouts, ...resultadosBusca, ...(treinoDestaque ? [treinoDestaque] : [])].find((w) => w.id === editando);
 
   return (
     <div>
@@ -1754,7 +1801,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
         <TextInput
-          placeholder="Buscar por qualquer palavra: nome, código, categoria, tag..."
+          placeholder="Buscar por qualquer palavra: nome, código, tag..."
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
           style={{ paddingLeft: 32 }}
@@ -1794,6 +1841,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               onExcluir={excluir} onCompartilhar={compartilhar} legendas={legendas}
               destaque={w.id === bannerWorkoutId}
               senha={senha}
+              protocolo={protocolos.find((pr) => pr.id === w.protocoloId) || null}
             />
           ))}
           {!buscaAtiva && modoTodos && workouts.length < total && (
@@ -1819,6 +1867,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
             onCancelar={() => { setSheetAberto(false); setEditando(null); }}
             legendas={legendas}
             salvando={salvandoTreino}
+            protocolos={protocolos}
           />
         </Sheet>
       )}
@@ -3093,12 +3142,14 @@ function AvaliacaoHome({ senha, onToast }) {
 
 function ViewOnlyWorkout({ id, legendas }) {
   const [w, setW] = useState(null);
+  const [protocolo, setProtocolo] = useState(null);
   const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
     (async () => {
       const r = await fetchWorkoutById(id);
       setW(r);
+      setProtocolo(r && r.protocoloId ? await fetchProtocoloById(r.protocoloId) : null);
       setCarregando(false);
     })();
   }, [id]);
@@ -3134,7 +3185,7 @@ function ViewOnlyWorkout({ id, legendas }) {
           <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>{w.nome || "Treino sem nome"}</div>
           <div style={{ fontSize: 12, color: "#71727A", marginTop: 4, display: "flex", gap: 8, alignItems: "center" }}>
             <span>{w.data}</span>
-            {w.categoria && <Badge>{w.categoria}</Badge>}
+            <SeloProtocolo protocolo={protocolo} />
           </div>
           <WorkoutDetalhes w={w} legendas={legendas} />
         </div>
