@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
-  ClipboardList
+  ClipboardList, AlertCircle
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -461,6 +461,13 @@ async function excluirAvaliacaoDb(senha, id) {
   if (error) console.error(error);
   return !error;
 }
+// Avaliação "desatualizada" = enviada há mais de 3 meses
+function avaliacaoDesatualizada(iso) {
+  if (!iso) return false;
+  const limite = new Date();
+  limite.setMonth(limite.getMonth() - 3);
+  return new Date(iso) < limite;
+}
 function buildShareUrlAvaliacao() {
   const { origin, pathname } = window.location;
   return `${origin}${pathname}#/avaliacao`;
@@ -572,16 +579,34 @@ function GhostButton({ children, onClick, style }) {
     </button>
   );
 }
+// Rola o campo focado para o meio da área visível (evita o campo ficar escondido atrás do teclado)
+function rolarCampoParaVisivel(e) {
+  const alvo = e.target;
+  if (!alvo || !/^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName)) return;
+  if (alvo.type === "checkbox" || alvo.type === "radio") return;
+  setTimeout(() => {
+    if (alvo.scrollIntoView) alvo.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, 350);
+}
+
 function Sheet({ title, onClose, children }) {
-  const [alturaVisivel, setAlturaVisivel] = useState(
-    typeof window !== "undefined" ? window.innerHeight : 800
-  );
+  // vp = área realmente visível (muda quando o teclado do celular abre)
+  const [vp, setVp] = useState({
+    h: typeof window !== "undefined" ? window.innerHeight : 800,
+    top: 0,
+  });
   const scrollRef = useRef(null);
 
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const atualizar = () => setAlturaVisivel(vv.height);
+    const atualizar = () => {
+      setVp({ h: vv.height, top: vv.offsetTop });
+      const ativo = document.activeElement;
+      if (scrollRef.current && ativo && scrollRef.current.contains(ativo) && /^(INPUT|TEXTAREA|SELECT)$/.test(ativo.tagName)) {
+        setTimeout(() => ativo.scrollIntoView({ block: "center", behavior: "smooth" }), 120);
+      }
+    };
     atualizar();
     vv.addEventListener("resize", atualizar);
     vv.addEventListener("scroll", atualizar);
@@ -598,25 +623,21 @@ function Sheet({ title, onClose, children }) {
     return () => { document.body.style.overflow = original; };
   }, []);
 
-  const rolarCampoParaVisivel = (e) => {
-    const alvo = e.target;
-    setTimeout(() => {
-      if (alvo && alvo.scrollIntoView) {
-        alvo.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
-    }, 300);
-  };
+  const tecladoAberto = typeof window !== "undefined" && vp.h < window.innerHeight * 0.8;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 50, display: "flex", alignItems: "flex-end" }} onClick={onClose}>
+    <div
+      style={{ position: "fixed", left: 0, right: 0, top: vp.top, height: vp.h, background: "rgba(0,0,0,0.55)", zIndex: 50, display: "flex", alignItems: "flex-end" }}
+      onClick={onClose}
+    >
       <div
         ref={scrollRef}
         onClick={(e) => e.stopPropagation()}
-        onFocus={rolarCampoParaVisivel}
+        onFocus={(e) => { e.stopPropagation(); rolarCampoParaVisivel(e); }}
         style={{
           background: "#212226", width: "100%", maxWidth: 640, margin: "0 auto",
-          maxHeight: Math.round(alturaVisivel * 0.92), overflowY: "auto",
-          borderRadius: "16px 16px 0 0", padding: "18px 16px 28px", borderTop: "3px solid #E4DE00",
+          maxHeight: Math.round(vp.h * (tecladoAberto ? 0.98 : 0.92)), overflowY: "auto",
+          borderRadius: "16px 16px 0 0", padding: `18px 16px ${tecladoAberto ? 160 : 28}px`, borderTop: "3px solid #E4DE00",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -2573,7 +2594,7 @@ function AvaliacaoPage({ onVoltar }) {
   );
 
   return (
-    <div style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif", paddingBottom: 40 }}>
+    <div onFocus={rolarCampoParaVisivel} style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif", paddingBottom: 320 }}>
       <style>{FONT_IMPORT}</style>
       {topo}
       <div style={{ padding: "16px 16px 0", maxWidth: 640, margin: "0 auto" }}>
@@ -2673,6 +2694,18 @@ function AvaliacaoHome({ senha, onToast }) {
     if (ok) { setLista((l) => l.filter((x) => x.id !== item.id)); onToast("Avaliação excluída"); } else onToast("Erro ao excluir");
   });
 
+  // Só alerta na avaliação MAIS RECENTE de cada aluno (se ele já refez, a antiga não alerta)
+  const ultimaPorAluno = {};
+  (lista || []).forEach((it) => {
+    const k = (it.nome || "").trim().toLowerCase();
+    const t = new Date(it.enviado_em).getTime();
+    if (!ultimaPorAluno[k] || t > ultimaPorAluno[k]) ultimaPorAluno[k] = t;
+  });
+  const precisaAtualizar = (it) =>
+    avaliacaoDesatualizada(it.enviado_em) &&
+    new Date(it.enviado_em).getTime() === ultimaPorAluno[(it.nome || "").trim().toLowerCase()];
+  const totalAtualizar = (lista || []).filter(precisaAtualizar).length;
+
   const miniBtn = { flex: 1, fontSize: 12.5, padding: "9px 8px" };
 
   return (
@@ -2741,14 +2774,25 @@ function AvaliacaoHome({ senha, onToast }) {
         <Sheet title={`Respostas${lista ? ` (${lista.length})` : ""}`} onClose={() => setRespAberto(false)}>
           {!lista ? <Spinner /> : lista.length === 0 ? <EmptyState text="Nenhuma avaliação enviada ainda." /> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {totalAtualizar > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#FF8A3D1A", border: "1px solid #FF8A3D66", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#FF8A3D", fontWeight: 600 }}>
+                  <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                  {totalAtualizar} {totalAtualizar === 1 ? "aluno com avaliação" : "alunos com avaliação"} há mais de 3 meses: precisa atualizar
+                </div>
+              )}
               {lista.map((item) => {
                 const aberto = expandido === item.id;
+                const alerta = precisaAtualizar(item);
                 return (
                   <div key={item.id} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: "12px 14px" }}>
                     <div onClick={() => setExpandido(aberto ? null : item.id)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", gap: 8 }}>
-                      <div>
-                        <div style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>{item.nome}</div>
-                        <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 3 }}>{formatarDataHoraCompleta(item.enviado_em)}</div>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                        {alerta && <AlertCircle size={20} color="#FF8A3D" style={{ flexShrink: 0, marginTop: 1 }} />}
+                        <div>
+                          <div style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>{item.nome}</div>
+                          <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 3 }}>{formatarDataHoraCompleta(item.enviado_em)}</div>
+                          {alerta && <div style={{ fontSize: 11.5, color: "#FF8A3D", marginTop: 3, fontWeight: 600 }}>Avaliação com mais de 3 meses: precisa atualizar</div>}
+                        </div>
                       </div>
                       {aberto ? <ChevronUp size={18} color="#71727A" /> : <ChevronDown size={18} color="#71727A" />}
                     </div>
@@ -2912,7 +2956,7 @@ export default function App() {
 
   return (
     <SessaoContext.Provider value={{ desbloqueadoAte, estender: estenderSessao }}>
-    <div style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
+    <div onFocus={rolarCampoParaVisivel} style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
       <style>{FONT_IMPORT}</style>
 
       <div style={{ padding: "20px 16px 8px", borderBottom: "1px solid #222" }}>
