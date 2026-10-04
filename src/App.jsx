@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
-  ClipboardList, AlertCircle
+  ClipboardList, AlertCircle, BarChart3
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -162,6 +162,37 @@ function semanaDoAno(entrada) {
   return { semana, total, ano };
 }
 
+/* ---------------------------- datas da programação ---------------------------- */
+const MESES_ABREV = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const MESES_NOME = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const pad2 = (n) => String(n).padStart(2, "0");
+const dataISOLocal = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const formatarDiaMes = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
+// "2026-09-28" (ou data ISO completa) -> Date no fuso local, sem "pular" de dia
+function parseDataLocal(valor) {
+  if (!valor) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(valor));
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const d = new Date(valor);
+  return isNaN(d) ? null : d;
+}
+// Segunda-feira da semana da data informada (ou de hoje)
+function segundaDe(entrada) {
+  const d = entrada ? (parseDataLocal(entrada) || new Date()) : new Date();
+  const copia = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dia = copia.getDay() || 7;
+  copia.setDate(copia.getDate() - (dia - 1));
+  return dataISOLocal(copia);
+}
+// Data de referência da programação: a "semana de" escolhida (ou, nas antigas, a data de criação)
+const dataRefProgramacao = (p) => parseDataLocal(p.semanaInicio) || parseDataLocal(p.criadoEm);
+const botaoValidar = (ativo, cor) => ({
+  width: 32, height: 32, flexShrink: 0, borderRadius: 8, cursor: "pointer",
+  display: "flex", alignItems: "center", justifyContent: "center",
+  background: ativo ? cor : "transparent", color: ativo ? "#0A0A0A" : "#71727A",
+  border: `1.5px solid ${ativo ? cor : "#3A3B40"}`,
+});
+
 const exercicioFromDb = (r) => ({
   id: r.id, nome: r.nome || "", grupoGrande: r.grupo_grande || "",
   grupoMenor: r.grupo_menor || "", equipamento: r.equipamento || "", descricao: r.descricao || "",
@@ -274,6 +305,23 @@ async function searchWorkoutsDb(termo) {
   if (error) { console.error(error); return []; }
   return data.map(workoutFromDb);
 }
+// Todos os treinos que têm resultado registrado em algum bloco (filtra no aparelho)
+async function fetchWorkoutsComResultado() {
+  const todos = [];
+  const TAM = 500;
+  for (let off = 0; ; off += TAM) {
+    const { data, error } = await supabase
+      .from("workouts")
+      .select("*")
+      .order("data", { ascending: false })
+      .order("criado_em", { ascending: false })
+      .range(off, off + TAM - 1);
+    if (error) { console.error(error); break; }
+    todos.push(...data);
+    if (data.length < TAM) break;
+  }
+  return todos.map(workoutFromDb).filter((w) => (w.blocos || []).some((b) => (b.resultado || "").trim()));
+}
 async function fetchWorkoutById(id) {
   const { data, error } = await supabase.from("workouts").select("*").eq("id", id).maybeSingle();
   if (error || !data) { if (error) console.error(error); return null; }
@@ -352,10 +400,12 @@ const idsDoDia = (d) => (Array.isArray(d.protocoloIds) && d.protocoloIds.length 
 const diaTemConteudo = (d) => idsDoDia(d).length > 0 || !!(d.estrategia || "").trim();
 const programacaoFromDb = (r) => ({
   id: r.id, nome: r.nome || "", destaque: !!r.destaque, descricao: r.descricao || "",
+  semanaInicio: r.semana_inicio || "",
   dias: Array.isArray(r.dias) && r.dias.length === DIAS_SEMANA.length ? r.dias : diasVazios(),
   criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
 });
 const programacaoToDb = (p) => ({ nome: p.nome, destaque: !!p.destaque, descricao: p.descricao || "",
+  semana_inicio: p.semanaInicio || null,
   dias: p.dias.map((d) => { const ids = idsDoDia(d); return { ...d, protocoloIds: ids, protocoloId: ids[0] || "" }; }),
 });
 
@@ -364,26 +414,28 @@ async function fetchProgramacoes() {
   if (error) { console.error(error); return []; }
   return data.map(programacaoFromDb);
 }
-async function inserirProgramacaoDb(p) {
-  const agora = new Date().toISOString();
-  const payload = { ...programacaoToDb(p), criado_em: agora, atualizado_em: agora };
-  let { data, error } = await supabase.from("programacoes_semanais").insert(payload).select().single();
-  if (error) { // coluna "descricao" pode ainda não existir: tenta salvar sem ela
-    const { descricao, ...semDesc } = payload;
-    ({ data, error } = await supabase.from("programacoes_semanais").insert(semDesc).select().single());
+// Se colunas novas (semana_inicio, descricao) ainda não existem no banco, tenta salvar sem elas
+async function gravarProgramacao(executar, payload) {
+  let { data, error } = await executar(payload);
+  if (error) {
+    const { semana_inicio, ...p1 } = payload;
+    ({ data, error } = await executar(p1));
+    if (error) {
+      const { descricao, ...p2 } = p1;
+      ({ data, error } = await executar(p2));
+    }
   }
   if (error) { console.error(error); return null; }
   return programacaoFromDb(data);
 }
+async function inserirProgramacaoDb(p) {
+  const agora = new Date().toISOString();
+  const payload = { ...programacaoToDb(p), criado_em: agora, atualizado_em: agora };
+  return gravarProgramacao((d) => supabase.from("programacoes_semanais").insert(d).select().single(), payload);
+}
 async function atualizarProgramacaoDb(id, p) {
   const payload = { ...programacaoToDb(p), atualizado_em: new Date().toISOString() };
-  let { data, error } = await supabase.from("programacoes_semanais").update(payload).eq("id", id).select().single();
-  if (error) { // coluna "descricao" pode ainda não existir: tenta salvar sem ela
-    const { descricao, ...semDesc } = payload;
-    ({ data, error } = await supabase.from("programacoes_semanais").update(semDesc).eq("id", id).select().single());
-  }
-  if (error) { console.error(error); return null; }
-  return programacaoFromDb(data);
+  return gravarProgramacao((d) => supabase.from("programacoes_semanais").update(d).eq("id", id).select().single(), payload);
 }
 async function excluirProgramacaoDb(id) {
   const { error } = await supabase.from("programacoes_semanais").delete().eq("id", id);
@@ -1713,6 +1765,9 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const [expandidoId, setExpandidoId] = useState(null);
   const [protocolos, setProtocolos] = useState([]);
   const [treinoDestaque, setTreinoDestaque] = useState(null);
+  const [modoResultados, setModoResultados] = useState(false);
+  const [listaResultados, setListaResultados] = useState([]);
+  const [carregandoResultados, setCarregandoResultados] = useState(false);
   const debounceRef = useRef(null);
   const { pedir, Modal } = useSenhaGate(senha);
 
@@ -1725,6 +1780,19 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setTreinoDestaque(await fetchWorkoutById(bannerWorkoutId));
   }, [bannerWorkoutId]);
   useEffect(() => { carregarDestaque(); }, [carregarDestaque]);
+
+  // Botão "Resultados" (pede senha): lista todos os treinos que têm resultado registrado
+  const carregarResultados = async () => {
+    setCarregandoResultados(true);
+    setListaResultados(await fetchWorkoutsComResultado());
+    setCarregandoResultados(false);
+  };
+  const abrirResultados = () => pedir(async () => {
+    setModoResultados(true);
+    setExpandidoId(null);
+    await carregarResultados();
+  });
+  const fecharResultados = () => { setModoResultados(false); setExpandidoId(null); };
 
   const carregarRecentes = useCallback(async () => {
     setCarregandoRecentes(true);
@@ -1772,6 +1840,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const recarregarTudo = async () => {
     await carregarRecentes();
     await carregarDestaque();
+    if (modoResultados) await carregarResultados();
     if (modoTodos) await carregarPrimeiraPagina();
     if (busca.trim()) {
       const rows = await searchWorkoutsDb(busca.trim());
@@ -1799,6 +1868,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setTreinoDestaque((prev) => (prev && prev.id === id ? null : prev));
     setRecentes((prev) => prev.filter((w) => w.id !== id));
     setResultadosBusca((prev) => prev.filter((w) => w.id !== id));
+    setListaResultados((prev) => prev.filter((w) => w.id !== id));
     setTotalGeral((prev) => Math.max(0, prev - 1));
   });
 
@@ -1807,11 +1877,14 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     onToast(ok ? "Link do treino copiado!" : "Não consegui copiar o link");
   };
 
-  const listaBase = buscaAtiva ? resultadosBusca : (modoTodos ? workouts : recentes);
-  const listaExibida = !buscaAtiva && treinoDestaque
+  const termoRes = busca.trim().toLowerCase();
+  const resultadosFiltrados = listaResultados.filter((w) =>
+    !termoRes || [w.nome, w.codigo, w.tags].filter(Boolean).join(" ").toLowerCase().includes(termoRes));
+  const listaBase = modoResultados ? resultadosFiltrados : (buscaAtiva ? resultadosBusca : (modoTodos ? workouts : recentes));
+  const listaExibida = !modoResultados && !buscaAtiva && treinoDestaque
     ? [treinoDestaque, ...listaBase.filter((x) => x.id !== treinoDestaque.id)]
     : listaBase;
-  const carregandoLista = buscaAtiva ? false : (modoTodos ? carregando : carregandoRecentes);
+  const carregandoLista = modoResultados ? carregandoResultados : (buscaAtiva ? false : (modoTodos ? carregando : carregandoRecentes));
   const treinoEmEdicao = [...recentes, ...workouts, ...resultadosBusca, ...(treinoDestaque ? [treinoDestaque] : [])].find((w) => w.id === editando);
 
   return (
@@ -1826,6 +1899,21 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
 
       <LegendaNiveis legendas={legendas} setLegendas={setLegendas} senha={senha} />
 
+      <button
+        onClick={modoResultados ? fecharResultados : abrirResultados}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer",
+          background: modoResultados ? "#E4DE00" : "#1C1D20", color: modoResultados ? "#0A0A0A" : "#F1EFE9",
+          border: `1px solid ${modoResultados ? "#E4DE00" : "#2E2F34"}`, borderRadius: 10, padding: "12px 14px",
+          marginBottom: 12, fontSize: 14, fontWeight: 700,
+        }}
+      >
+        <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Check size={18} color={modoResultados ? "#0A0A0A" : "#E4DE00"} /> Resultados
+        </span>
+        {modoResultados ? <X size={16} /> : <Lock size={14} color="#71727A" />}
+      </button>
+
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
         <TextInput
@@ -1836,19 +1924,25 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
         />
       </div>
 
-      {!buscaAtiva && modoTodos && (
+      {!modoResultados && !buscaAtiva && modoTodos && (
         <GhostButton onClick={voltarRecentes} style={{ marginBottom: 14 }}>
           <ArrowLeft size={14} /> Voltar aos recentes
         </GhostButton>
       )}
 
-      {!buscaAtiva && !modoTodos && (
+      {modoResultados && !carregandoResultados && (
+        <div style={{ fontSize: 11.5, color: "#E4DE00", marginBottom: 12, fontWeight: 600 }}>
+          {resultadosFiltrados.length} treino(s) com resultado{buscaAtiva ? ` para "${busca.trim()}"` : ""}
+        </div>
+      )}
+
+      {!modoResultados && !buscaAtiva && !modoTodos && (
         <div style={{ fontSize: 11.5, color: "#5f6066", marginBottom: 12 }}>
           Mostrando os {Math.min(6, totalGeral)} treinos mais recentes
         </div>
       )}
 
-      {buscaAtiva && (
+      {!modoResultados && buscaAtiva && (
         <div style={{ fontSize: 11.5, color: "#5f6066", marginBottom: 12 }}>
           {buscando ? "Buscando..." : `${resultadosBusca.length} resultado(s) para "${busca.trim()}"`}
         </div>
@@ -1859,7 +1953,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       ) : (
         <>
           {listaExibida.length === 0 && (
-            <EmptyState text={buscaAtiva ? "Nenhum treino encontrado para essa busca." : "Nenhum treino programado ainda. Toque em 'Novo treino'."} />
+            <EmptyState text={modoResultados ? "Nenhum treino com resultado registrado." : buscaAtiva ? "Nenhum treino encontrado para essa busca." : "Nenhum treino programado ainda. Toque em 'Novo treino'."} />
           )}
           {listaExibida.map((w) => (
             <WorkoutCard
@@ -1872,12 +1966,12 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               protocolo={protocolos.find((pr) => pr.id === w.protocoloId) || null}
             />
           ))}
-          {!buscaAtiva && modoTodos && workouts.length < total && (
+          {!modoResultados && !buscaAtiva && modoTodos && workouts.length < total && (
             <GhostButton onClick={carregarMais} style={{ width: "100%" }}>
               {carregandoMais ? "Carregando..." : `Carregar mais (${workouts.length}/${total})`}
             </GhostButton>
           )}
-          {!buscaAtiva && !modoTodos && totalGeral > 6 && (
+          {!modoResultados && !buscaAtiva && !modoTodos && totalGeral > 6 && (
             <GhostButton onClick={abrirTodos} style={{ width: "100%" }}>
               <Lock size={14} /> Ver todos os treinos ({totalGeral})
             </GhostButton>
@@ -2448,7 +2542,11 @@ function ProtocolosTab({ senha, onToast }) {
 ================================================================= */
 
 function ProgramacaoForm({ inicial, protocolos, onSalvar, onCancelar, salvando }) {
-  const [form, setForm] = useState(inicial || { nome: "", destaque: false, descricao: "", dias: diasVazios() });
+  const [form, setForm] = useState(
+    inicial
+      ? { ...inicial, semanaInicio: inicial.semanaInicio || segundaDe(inicial.criadoEm) }
+      : { nome: "", destaque: false, descricao: "", semanaInicio: segundaDe(), dias: diasVazios() }
+  );
 
   const atualizarDia = (idx, campo, valor) => {
     setForm({ ...form, dias: form.dias.map((d, i) => (i === idx ? { ...d, [campo]: valor } : d)) });
@@ -2461,6 +2559,16 @@ function ProgramacaoForm({ inicial, protocolos, onSalvar, onCancelar, salvando }
     <div>
       <Field label="Nome da programação">
         <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder='Ex: "CT - Fernando"' />
+      </Field>
+
+      <Field label="Semana de (segunda-feira)">
+        <TextInput type="date" value={form.semanaInicio || ""} onChange={(e) => setForm({ ...form, semanaInicio: e.target.value })} />
+        {(() => {
+          const d = parseDataLocal(form.semanaInicio);
+          if (!d) return null;
+          const w = semanaDoAno(d);
+          return <div style={{ fontSize: 11.5, color: "#E4DE00", marginTop: 6, fontWeight: 700 }}>SEMANA {w.semana}/{w.total}</div>;
+        })()}
       </Field>
 
       <Field label="Descrição da programação (visível para todos)">
@@ -2526,7 +2634,7 @@ function ProgramacaoForm({ inicial, protocolos, onSalvar, onCancelar, salvando }
   );
 }
 
-function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onExcluir, senha }) {
+function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onExcluir, onValidar, senha }) {
   const { pedir, Modal } = useSenhaGate(senha);
 
   const alternar = () => {
@@ -2535,6 +2643,15 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
   };
 
   const nomeProtocolo = (id) => (protocolos.find((p) => p.id === id) || {}).titulo || "";
+
+  // Resumo da validação da semana
+  const resumo = { sim: 0, nao: 0, total: 0 };
+  item.dias.forEach((d) => idsDoDia(d).forEach((pid) => {
+    resumo.total++;
+    const v = (d.validacao || {})[pid];
+    if (v === "sim") resumo.sim++;
+    else if (v === "nao") resumo.nao++;
+  }));
 
   return (
     <div style={{
@@ -2553,15 +2670,29 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
       )}
       <div style={{ padding: "14px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={alternar}>
         <div>
-          {item.criadoEm && (() => {
-            const w = semanaDoAno(item.criadoEm);
-            return <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", marginBottom: 3 }}>SEMANA {w.semana}/{w.total}</div>;
+          {(() => {
+            const ref = dataRefProgramacao(item);
+            if (!ref) return null;
+            const w = semanaDoAno(ref);
+            const fim = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() + 6);
+            return (
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", marginBottom: 3 }}>
+                SEMANA {w.semana}/{w.total} · {formatarDiaMes(ref)} a {formatarDiaMes(fim)}
+              </div>
+            );
           })()}
           <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: item.destaque ? "#FFFFFF" : "#D8D8D3", letterSpacing: "0.03em", textTransform: "uppercase" }}>
             {item.nome || "Programação sem nome"}
           </div>
           {item.descricao && (
             <div style={{ fontSize: 13, color: "#D8D8D3", marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.5, textTransform: "none" }}>{item.descricao}</div>
+          )}
+          {resumo.sim + resumo.nao > 0 && (
+            <div style={{ fontSize: 11.5, marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap", fontWeight: 700 }}>
+              <span style={{ color: "#4CAF6D" }}>✓ {resumo.sim} aconteceram</span>
+              {resumo.nao > 0 && <span style={{ color: "#E6483F" }}>✗ {resumo.nao} não</span>}
+              {resumo.total - resumo.sim - resumo.nao > 0 && <span style={{ color: "#71727A" }}>{resumo.total - resumo.sim - resumo.nao} a validar</span>}
+            </div>
           )}
           <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 4, display: "flex", alignItems: "center", gap: 5 }}>
             {!item.destaque && <Lock size={11} />} {item.destaque ? "Visível pra todos" : "Detalhes protegidos por senha"}
@@ -2572,6 +2703,11 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
 
       {expandido && (
         <div style={{ padding: "0 16px 16px", borderTop: "1px solid #2E2F34" }}>
+          {resumo.total > 0 && (
+            <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 12, lineHeight: 1.4 }}>
+              Ao fim da semana, marque cada protocolo: <span style={{ color: "#4CAF6D", fontWeight: 700 }}>✓ aconteceu</span> ou <span style={{ color: "#E6483F", fontWeight: 700 }}>✗ não aconteceu</span> (pede senha).
+            </div>
+          )}
           {item.dias.filter(diaTemConteudo).length === 0 && (
             <div style={{ fontSize: 12.5, color: "#71727A", marginTop: 14 }}>Nenhum dia definido nesta programação.</div>
           )}
@@ -2583,10 +2719,13 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
               {idsDoDia(d).map((pid) => {
                 const pr = protocolos.find((p) => p.id === pid);
                 if (!pr) return null;
+                const status = (d.validacao || {})[pid];
                 return (
-                  <div key={pid} style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 4 }}>
+                  <div key={pid} style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6 }}>
                     {pr.icone && <IconeProtocolo id={pr.icone} size={22} />}
-                    <span style={{ fontSize: 13, color: "#F1EFE9", fontWeight: 700 }}>{pr.titulo || "Protocolo sem título"}</span>
+                    <span style={{ flex: 1, fontSize: 13, color: "#F1EFE9", fontWeight: 700 }}>{pr.titulo || "Protocolo sem título"}</span>
+                    <button onClick={() => onValidar(item, d.dia, pid, "sim")} title="Aconteceu" style={botaoValidar(status === "sim", "#4CAF6D")}><Check size={16} /></button>
+                    <button onClick={() => onValidar(item, d.dia, pid, "nao")} title="Não aconteceu" style={botaoValidar(status === "nao", "#E6483F")}><X size={16} /></button>
                   </div>
                 );
               })}
@@ -2602,6 +2741,95 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
         </div>
       )}
       {Modal}
+    </div>
+  );
+}
+
+// Gráfico: protocolos que realmente aconteceram, mês a mês
+function GraficoProtocolosMes({ programacoes, protocolos }) {
+  const [mesSel, setMesSel] = useState("");
+
+  // dados[mes][protocoloId] = { sim, nao }
+  const dados = {};
+  programacoes.forEach((p) => {
+    const ref = dataRefProgramacao(p);
+    if (!ref) return;
+    const mes = `${ref.getFullYear()}-${pad2(ref.getMonth() + 1)}`;
+    p.dias.forEach((d) => idsDoDia(d).forEach((pid) => {
+      const v = (d.validacao || {})[pid];
+      if (v !== "sim" && v !== "nao") return;
+      if (!dados[mes]) dados[mes] = {};
+      if (!dados[mes][pid]) dados[mes][pid] = { sim: 0, nao: 0 };
+      dados[mes][pid][v]++;
+    }));
+  });
+  const meses = Object.keys(dados).sort().slice(-12);
+  const atual = meses.includes(mesSel) ? mesSel : meses[meses.length - 1];
+  const totalMes = (m) => Object.values(dados[m]).reduce((soma, c) => soma + c.sim, 0);
+  const maxTotal = Math.max(1, ...meses.map(totalMes));
+  const linhas = atual
+    ? Object.entries(dados[atual]).map(([pid, c]) => ({ pid, ...c })).sort((a, b) => b.sim - a.sim || b.nao - a.nao)
+    : [];
+  const maxSim = Math.max(1, ...linhas.map((l) => l.sim));
+
+  return (
+    <div style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 12, padding: "14px 16px", marginTop: 22 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <BarChart3 size={18} color="#E4DE00" />
+        <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.05em" }}>PROTOCOLOS MAIS USADOS</span>
+      </div>
+      <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 4, lineHeight: 1.4 }}>
+        Mês a mês. Conta só os protocolos marcados como "aconteceu" nas programações.
+      </div>
+
+      {meses.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: "#9A9A94", marginTop: 14 }}>
+          Ainda sem dados. Abra uma programação e marque ✓ ou ✗ em cada protocolo ao fim da semana.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 6, alignItems: "flex-end", height: 104, overflowX: "auto", marginTop: 14 }}>
+            {meses.map((m) => {
+              const t = totalMes(m);
+              const ativo = m === atual;
+              const h = Math.max(4, Math.round((t / maxTotal) * 62));
+              return (
+                <button
+                  key={m}
+                  onClick={() => setMesSel(m)}
+                  style={{ flex: "1 0 40px", minWidth: 40, background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 3 }}
+                >
+                  <span style={{ fontSize: 11, fontWeight: 800, color: ativo ? "#E4DE00" : "#9A9A94" }}>{t}</span>
+                  <div style={{ width: "100%", maxWidth: 34, height: h, borderRadius: 4, background: ativo ? "#E4DE00" : "#4A4B14" }} />
+                  <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", color: ativo ? "#E4DE00" : "#71727A" }}>{MESES_ABREV[Number(m.slice(5)) - 1]}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #2E2F34" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              {MESES_NOME[Number(atual.slice(5)) - 1]} de {atual.slice(0, 4)} · {totalMes(atual)} realizados
+            </div>
+            {linhas.map((l) => {
+              const pr = protocolos.find((x) => x.id === l.pid);
+              return (
+                <div key={l.pid} style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    {pr && pr.icone && <IconeProtocolo id={pr.icone} size={20} />}
+                    <span style={{ flex: 1, fontSize: 13, color: "#F1EFE9", fontWeight: 700 }}>{pr ? (pr.titulo || "Protocolo sem título") : "Protocolo removido"}</span>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "#E4DE00" }}>{l.sim}×</span>
+                  </div>
+                  <div style={{ height: 7, background: "#26272B", borderRadius: 4, marginTop: 5, overflow: "hidden" }}>
+                    <div style={{ width: `${(l.sim / maxSim) * 100}%`, height: "100%", background: "#E4DE00" }} />
+                  </div>
+                  {l.nao > 0 && <div style={{ fontSize: 11, color: "#E6483F", marginTop: 3 }}>{l.nao}× não aconteceu</div>}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -2633,6 +2861,18 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
   const excluir = (id) => pedir(async () => {
     await excluirProgramacaoDb(id);
     setProgramacoes((prev) => prev.filter((p) => p.id !== id));
+  });
+  // Validação ao fim da semana: ✓ aconteceu / ✗ não aconteceu (toque de novo para limpar)
+  const validar = (item, diaNome, pid, valor) => pedir(async () => {
+    const dias = item.dias.map((d) => {
+      if (d.dia !== diaNome) return d;
+      const val = { ...(d.validacao || {}) };
+      if (val[pid] === valor) delete val[pid]; else val[pid] = valor;
+      return { ...d, validacao: val };
+    });
+    const ok = await atualizarProgramacaoDb(item.id, { ...item, dias });
+    if (ok) setProgramacoes((prev) => prev.map((p) => (p.id === item.id ? { ...p, dias } : p)));
+    else if (onToast) onToast("Não foi possível salvar a validação");
   });
 
   const salvar = async (form) => {
@@ -2700,9 +2940,11 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
               onToggle={() => setExpandidoId(expandidoId === item.id ? null : item.id)}
               onEditar={abrirEdicao}
               onExcluir={excluir}
+              onValidar={validar}
               senha={senha}
             />
           ))}
+          <GraficoProtocolosMes programacoes={programacoes} protocolos={protocolos} />
         </>
       )}
 
