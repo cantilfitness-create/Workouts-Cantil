@@ -1421,16 +1421,16 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onTogg
   return (
     <div style={{
       background: "#1A1B1E",
-      border: destaque ? "1px solid #E4DE00" : "1px solid #26272B",
+      border: destaque ? "1px solid rgba(228,222,0,0.3)" : "1px solid #26272B",
       borderRadius: 12, marginBottom: 10, overflow: "hidden",
     }}>
       {destaque && (
         <div style={{
-          background: "#E4DE00", color: "#0A0A0A", fontWeight: 800, fontSize: 11,
-          letterSpacing: "0.08em", textTransform: "uppercase", padding: "6px 16px",
-          display: "flex", alignItems: "center", gap: 5,
+          background: "rgba(228,222,0,0.09)", color: "#E4DE00", fontWeight: 700, fontSize: 10.5,
+          letterSpacing: "0.1em", textTransform: "uppercase", padding: "5px 16px",
+          display: "flex", alignItems: "center", gap: 5, borderBottom: "1px solid rgba(228,222,0,0.15)",
         }}>
-          <Star size={12} fill="#0A0A0A" /> Destaque
+          <Star size={11} fill="#E4DE00" color="#E4DE00" /> Destaque
         </div>
       )}
       <div style={{ padding: "14px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={onToggle}>
@@ -1513,6 +1513,7 @@ function BannerDestaque({ banner, setBanner, senha }) {
   const [salvando, setSalvando] = useState(false);
   const [opcoes, setOpcoes] = useState([]);
   const [workoutDoBanner, setWorkoutDoBanner] = useState(null);
+  const [protocoloDoBanner, setProtocoloDoBanner] = useState(null);
   const [form, setForm] = useState(banner || { tipo: "Treino do dia", workoutId: "", observacao: "", titulo: "", descricao: "" });
 
   useEffect(() => {
@@ -1520,8 +1521,10 @@ function BannerDestaque({ banner, setBanner, senha }) {
       if (banner && banner.workoutId && banner.tipo !== "Aviso") {
         const w = await fetchWorkoutById(banner.workoutId);
         setWorkoutDoBanner(w);
+        setProtocoloDoBanner(w && w.protocoloId ? await fetchProtocoloById(w.protocoloId) : null);
       } else {
         setWorkoutDoBanner(null);
+        setProtocoloDoBanner(null);
       }
     })();
   }, [banner]);
@@ -1554,50 +1557,75 @@ function BannerDestaque({ banner, setBanner, senha }) {
   return (
     <div style={{ marginBottom: 18 }}>
       {temConteudo ? (
-        <div style={{
-          position: "relative", background: "linear-gradient(135deg, rgba(228,222,0,0.14), rgba(228,222,0,0.03))",
-          border: "1px solid rgba(228,222,0,0.4)", borderRadius: 12, padding: 16,
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-            <div>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#E4DE00", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                <Megaphone size={13} /> {banner.tipo || "Destaque"}
+        <div style={{ borderRadius: 14, overflow: "hidden", border: "1px solid #E4DE00", boxShadow: "0 2px 16px rgba(228,222,0,0.18)" }}>
+          {/* Parte de cima: cor sólida */}
+          <div style={{ background: "#E4DE00", color: "#0A0A0A", padding: "14px 16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                <Megaphone size={14} /> {banner.tipo || "Destaque"}
               </span>
-
-              {banner.tipo === "Aviso" ? (
-                <>
-                  <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 19, color: "#FFFFFF", marginTop: 8, textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                    {banner.titulo}
-                  </div>
-                  {banner.descricao && <div style={{ fontSize: 13, color: "#D8D8D3", marginTop: 6, lineHeight: 1.4 }}>{banner.descricao}</div>}
-                </>
-              ) : workoutDoBanner ? (
-                <>
-                  <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 19, color: "#FFFFFF", marginTop: 8, textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                    {workoutDoBanner.nome || "Treino sem nome"}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#B9BABF", marginTop: 4, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span>{workoutDoBanner.data}</span>
-                    {workoutDoBanner.codigo && <Badge>#{workoutDoBanner.codigo}</Badge>}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                    {workoutDoBanner.blocos.map((b) => <Stamp key={b.id} nome={b.nivel} cor={corDoNivel(b.nivel)} size="sm" />)}
-                  </div>
-                  {banner.observacao && <div style={{ fontSize: 13, color: "#D8D8D3", marginTop: 8, lineHeight: 1.4 }}>{banner.observacao}</div>}
-                  <a
-                    href={buildShareUrl(workoutDoBanner.id)}
-                    onClick={(e) => { e.preventDefault(); window.location.hash = `/w/${workoutDoBanner.id}`; }}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 10, color: "#E4DE00", fontSize: 12.5, fontWeight: 700, textDecoration: "none" }}
-                  >
-                    <LinkIcon size={13} /> Ver treino completo
-                  </a>
-                </>
-              ) : (
-                <div style={{ fontSize: 12.5, color: "#71727A", marginTop: 8 }}>O treino desse destaque foi removido.</div>
-              )}
+              <Pencil size={17} color="#0A0A0A" style={{ cursor: "pointer", flexShrink: 0 }} onClick={abrirEdicao} />
             </div>
-            <Pencil size={16} color="#9A9A94" style={{ cursor: "pointer", flexShrink: 0 }} onClick={abrirEdicao} />
+
+            {banner.tipo === "Aviso" ? (
+              <>
+                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 24, marginTop: 8, textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.1 }}>
+                  {banner.titulo}
+                </div>
+                {banner.descricao && <div style={{ fontSize: 13.5, color: "#1F1F1F", marginTop: 6, lineHeight: 1.45, fontWeight: 500 }}>{banner.descricao}</div>}
+              </>
+            ) : workoutDoBanner ? (
+              <>
+                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 26, marginTop: 8, textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.1 }}>
+                  {workoutDoBanner.nome || "Treino sem nome"}
+                </div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span>{workoutDoBanner.data}</span>
+                  {workoutDoBanner.codigo && (
+                    <span style={{ background: "rgba(10,10,10,0.14)", borderRadius: 6, padding: "2px 8px", fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+                      #{workoutDoBanner.codigo}
+                    </span>
+                  )}
+                </div>
+                {banner.observacao && <div style={{ fontSize: 14, fontWeight: 800, marginTop: 8, lineHeight: 1.35 }}>{banner.observacao}</div>}
+              </>
+            ) : (
+              <div style={{ fontSize: 13, marginTop: 8, fontWeight: 600 }}>O treino desse destaque foi removido.</div>
+            )}
           </div>
+
+          {/* Parte de baixo: resultados já visíveis, sem precisar abrir */}
+          {banner.tipo !== "Aviso" && workoutDoBanner && (
+            <div style={{ background: "#141414", padding: "12px 16px 14px" }}>
+              {protocoloDoBanner && <div style={{ marginBottom: 10 }}><SeloProtocolo protocolo={protocoloDoBanner} /></div>}
+              {workoutDoBanner.blocos.map((b, i) => (
+                <div key={b.id} style={{ marginBottom: 10, borderLeft: `3px solid ${corDoNivel(b.nivel)}`, paddingLeft: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 12.5, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                      Workout {i + 1}{b.titulo ? ` — ${b.titulo}` : ""}
+                    </span>
+                    <Stamp nome={b.nivel} cor={corDoNivel(b.nivel)} size="sm" />
+                  </div>
+                  {b.resultado ? (
+                    <div style={{ marginTop: 6, background: "rgba(228,222,0,0.10)", border: "1px solid rgba(228,222,0,0.35)", borderRadius: 8, padding: "8px 10px" }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 3 }}>Resultado</div>
+                      <div style={{ fontSize: 13.5, color: "#F1EFE9", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{b.resultado}</div>
+                      {b.resultadoData && <div style={{ fontSize: 10.5, color: "#8C8D91", marginTop: 4 }}>{formatarDataHora(b.resultadoData)}</div>}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "#6B6C72", marginTop: 4 }}>Sem resultado registrado</div>
+                  )}
+                </div>
+              ))}
+              <a
+                href={buildShareUrl(workoutDoBanner.id)}
+                onClick={(e) => { e.preventDefault(); window.location.hash = `/w/${workoutDoBanner.id}`; }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 2, color: "#E4DE00", fontSize: 12.5, fontWeight: 700, textDecoration: "none" }}
+              >
+                <LinkIcon size={13} /> Ver treino completo
+              </a>
+            </div>
+          )}
         </div>
       ) : (
         <button
