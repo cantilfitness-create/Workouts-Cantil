@@ -2844,6 +2844,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [expandidoId, setExpandidoId] = useState(null);
+  const [mostrarPassadas, setMostrarPassadas] = useState(false);
   const { pedir, Modal } = useSenhaGate(senha);
 
   const carregar = useCallback(async () => {
@@ -2896,6 +2897,32 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     ? programacoes.filter((p) => (p.nome || "").toLowerCase().includes(busca.trim().toLowerCase()))
     : programacoes;
 
+  // Semanas que já terminaram ficam recolhidas, abaixo do gráfico (destaque nunca é recolhido)
+  const hoje0 = new Date();
+  hoje0.setHours(0, 0, 0, 0);
+  const ehPassada = (p) => {
+    if (p.destaque) return false;
+    const ref = dataRefProgramacao(p);
+    if (!ref) return false;
+    return new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() + 6) < hoje0;
+  };
+  const atuais = filtradas.filter((p) => !ehPassada(p));
+  const passadas = filtradas.filter(ehPassada).sort((x, y) => dataRefProgramacao(y) - dataRefProgramacao(x));
+  const passadasAbertas = mostrarPassadas || buscaAtiva;
+  const renderCard = (item) => (
+    <ProgramacaoCard
+      key={item.id}
+      item={item}
+      protocolos={protocolos}
+      expandido={expandidoId === item.id}
+      onToggle={() => setExpandidoId(expandidoId === item.id ? null : item.id)}
+      onEditar={abrirEdicao}
+      onExcluir={excluir}
+      onValidar={validar}
+      senha={senha}
+    />
+  );
+
   return (
     <div>
       {(() => {
@@ -2931,20 +2958,32 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
           {filtradas.length === 0 && (
             <EmptyState text={buscaAtiva ? "Nenhuma programação encontrada." : "Nenhuma programação criada ainda. Toque em 'Nova programação'."} />
           )}
-          {filtradas.map((item) => (
-            <ProgramacaoCard
-              key={item.id}
-              item={item}
-              protocolos={protocolos}
-              expandido={expandidoId === item.id}
-              onToggle={() => setExpandidoId(expandidoId === item.id ? null : item.id)}
-              onEditar={abrirEdicao}
-              onExcluir={excluir}
-              onValidar={validar}
-              senha={senha}
-            />
-          ))}
+          {filtradas.length > 0 && atuais.length === 0 && (
+            <div style={{ fontSize: 12.5, color: "#71727A", marginBottom: 6 }}>
+              Nenhuma programação para esta semana. Toque em "Nova programação".
+            </div>
+          )}
+          {atuais.map(renderCard)}
           <GraficoProtocolosMes programacoes={programacoes} protocolos={protocolos} />
+
+          {passadas.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <button
+                onClick={() => setMostrarPassadas(!mostrarPassadas)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer",
+                  background: "#1C1D20", color: "#B9BABF", border: "1px solid #2E2F34", borderRadius: 10,
+                  padding: "12px 14px", fontSize: 13.5, fontWeight: 700,
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <CalendarDays size={16} color="#71727A" /> Semanas anteriores ({passadas.length})
+                </span>
+                {passadasAbertas ? <ChevronUp size={18} color="#71727A" /> : <ChevronDown size={18} color="#71727A" />}
+              </button>
+              {passadasAbertas && <div style={{ marginTop: 10 }}>{passadas.map(renderCard)}</div>}
+            </div>
+          )}
         </>
       )}
 
