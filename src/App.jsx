@@ -736,68 +736,82 @@ function GhostButton({ children, onClick, style }) {
   );
 }
 // Rola o campo focado para o meio da área visível (evita o campo ficar escondido atrás do teclado)
-// Textos longos (textarea) NÃO são centralizados: o próprio iPhone já mantém o cursor visível,
-// e mexer na rolagem enquanto digita deixava o cursor em um lugar e o texto em outro.
+// Garante que o campo que está sendo digitado fique visível acima do teclado.
+// Só age se o campo estiver escondido (coberto pelo teclado ou fora do topo) e rola UMA vez.
+function garantirCampoVisivel(el) {
+  if (!el || !el.getBoundingClientRect) return;
+  const vv = window.visualViewport;
+  const topoVisivel = vv ? vv.offsetTop : 0;
+  const alturaVisivel = vv ? vv.height : window.innerHeight;
+  const r = el.getBoundingClientRect();
+  const margemTopo = 80;
+  const escondido = r.top < topoVisivel + 40 || r.bottom > topoVisivel + alturaVisivel - 20;
+  if (!escondido) return;
+  let pai = el.parentElement;
+  while (pai && !(pai.scrollHeight > pai.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(pai).overflowY))) pai = pai.parentElement;
+  const delta = r.top - (topoVisivel + margemTopo);
+  if (pai) pai.scrollBy({ top: delta });
+  else window.scrollBy({ top: delta });
+}
 function rolarCampoParaVisivel(e) {
   const alvo = e.target;
-  if (!alvo || !/^(INPUT|SELECT)$/.test(alvo.tagName)) return;
-  if (alvo.type === "checkbox" || alvo.type === "radio" || alvo.type === "file") return;
-  setTimeout(() => {
-    if (document.activeElement === alvo && alvo.scrollIntoView) alvo.scrollIntoView({ block: "center" });
-  }, 350);
+  if (!alvo || !/^(INPUT|TEXTAREA)$/.test(alvo.tagName)) return;
+  if (["checkbox", "radio", "file", "button", "submit"].includes(alvo.type)) return;
+  // espera o teclado terminar de subir; tenta de novo caso ele ainda esteja animando
+  [300, 650].forEach((ms) => setTimeout(() => {
+    if (document.activeElement === alvo) garantirCampoVisivel(alvo);
+  }, ms));
 }
 
+// Janela que sobe de baixo. A ÁREA INTEIRA rola (não só o miolo), e ganha uma folga no final
+// do tamanho do teclado, para qualquer campo poder subir acima dele.
 function Sheet({ title, onClose, children }) {
-  // vp = área realmente visível (muda quando o teclado do celular abre)
-  const [vp, setVp] = useState({
-    h: typeof window !== "undefined" ? window.innerHeight : 800,
-    top: 0,
-  });
-  const scrollRef = useRef(null);
+  const [teclado, setTeclado] = useState(0); // altura aproximada do teclado (0 = fechado)
 
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    // Só acompanha a área visível (teclado abrindo/fechando). Não mexe na rolagem enquanto digita.
     const atualizar = () => {
-      const h = Math.round(vv.height);
-      const top = Math.round(vv.offsetTop);
-      setVp((antes) => (antes.h === h && antes.top === top ? antes : { h, top }));
+      const bruto = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+      const kb = bruto > 120 ? bruto : 0; // ignora pequenas variações da barra do navegador
+      setTeclado((antes) => (Math.abs(antes - kb) < 2 ? antes : kb));
     };
     atualizar();
     vv.addEventListener("resize", atualizar);
-    vv.addEventListener("scroll", atualizar);
-    return () => {
-      vv.removeEventListener("resize", atualizar);
-      vv.removeEventListener("scroll", atualizar);
-    };
+    return () => vv.removeEventListener("resize", atualizar);
   }, []);
 
   useEffect(() => {
     const original = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    if (scrollRef.current) scrollRef.current.scrollTop = 0;
     return () => { document.body.style.overflow = original; };
   }, []);
 
-  const tecladoAberto = typeof window !== "undefined" && vp.h < window.innerHeight * 0.8;
-
   return (
     <div
-      style={{ position: "fixed", left: 0, right: 0, top: vp.top, height: vp.h, background: "rgba(0,0,0,0.55)", zIndex: 50, display: "flex", alignItems: "flex-end" }}
       onClick={onClose}
+      onFocus={(e) => { e.stopPropagation(); rolarCampoParaVisivel(e); }}
+      style={{
+        position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 50,
+        background: "rgba(0,0,0,0.55)", overflowY: "auto", overflowX: "hidden",
+        WebkitOverflowScrolling: "touch", overscrollBehavior: "contain",
+        display: "flex", flexDirection: "column",
+      }}
     >
+      {/* espaço acima da janela (toque aqui fecha) */}
+      <div style={{ flex: "1 0 44px" }} />
       <div
-        ref={scrollRef}
         onClick={(e) => e.stopPropagation()}
-        onFocus={(e) => { e.stopPropagation(); rolarCampoParaVisivel(e); }}
         style={{
-          background: "#212226", width: "100%", maxWidth: 640, margin: "0 auto",
-          maxHeight: Math.round(vp.h * (tecladoAberto ? 0.98 : 0.92)), overflowY: "auto", overflowX: "hidden",
-          borderRadius: "16px 16px 0 0", padding: `18px 16px ${tecladoAberto ? 160 : 28}px`, borderTop: "3px solid #E4DE00",
+          background: "#212226", width: "100%", maxWidth: 640, alignSelf: "center", flexShrink: 0,
+          borderRadius: "16px 16px 0 0", borderTop: "3px solid #E4DE00",
+          padding: `0 16px ${28 + (teclado ? teclado + 60 : 0)}px`, boxSizing: "border-box",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{
+          position: "sticky", top: 0, zIndex: 2, background: "#212226",
+          display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 0 14px",
+        }}>
           <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.04em" }}>{title}</span>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#9A9A94", cursor: "pointer" }}><X size={22} /></button>
         </div>
@@ -806,6 +820,7 @@ function Sheet({ title, onClose, children }) {
     </div>
   );
 }
+
 function EmptyState({ text }) {
   return <div style={{ border: "1px dashed #3A3B40", borderRadius: 10, padding: "24px 16px", textAlign: "center", color: "#71727A", fontSize: 13 }}>{text}</div>;
 }
@@ -1458,13 +1473,37 @@ function WorkoutDetalhes({ w, legendas = {} }) {
 }
 
 // Selo compacto: ícone + nome do protocolo do treino
-function SeloProtocolo({ protocolo }) {
-  if (!protocolo) return null;
+// Toque no nome de um protocolo (em treino ou programação) abre a descrição por cima da tela atual.
+// Ao tocar em "Voltar" (ou no X), a pessoa continua exatamente onde estava.
+const ProtocoloViewerContext = React.createContext(null);
+function ProtocoloViewerProvider({ children }) {
+  const [aberto, setAberto] = useState(null);
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: "#E4DE00" }}>
+    <ProtocoloViewerContext.Provider value={setAberto}>
+      {children}
+      {aberto && <ProtocoloDetalhe p={aberto} onFechar={() => setAberto(null)} onVoltar={() => setAberto(null)} />}
+    </ProtocoloViewerContext.Provider>
+  );
+}
+
+function SeloProtocolo({ protocolo }) {
+  const abrir = useContext(ProtocoloViewerContext);
+  if (!protocolo) return null;
+  const conteudo = (
+    <>
       {protocolo.icone && <IconeProtocolo id={protocolo.icone} size={18} />}
       {protocolo.titulo || "Protocolo"}
-    </span>
+    </>
+  );
+  const base = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: "#E4DE00" };
+  if (!abrir) return <span style={base}>{conteudo}</span>;
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); abrir(protocolo); }}
+      style={{ ...base, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }}
+    >
+      {conteudo}
+    </button>
   );
 }
 
@@ -2405,6 +2444,82 @@ function ProtocoloCard({ p, expandido, onToggle, onEditar, onExcluir, onComparti
   );
 }
 
+// Mini-card do protocolo (3 por linha): ícone + nome. Toque abre os detalhes.
+function ProtocoloMini({ p, onAbrir }) {
+  return (
+    <button
+      onClick={() => onAbrir(p.id)}
+      style={{
+        minWidth: 0, minHeight: 116, cursor: "pointer", padding: "12px 6px 10px",
+        background: "linear-gradient(160deg, #1C1D20, #151618)", border: "1px solid #2A2B2F", borderTop: "3px solid #E4DE00",
+        borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", gap: 8,
+      }}
+    >
+      {p.icone ? (
+        <IconeProtocolo id={p.icone} size={52} />
+      ) : (
+        <div style={{ width: 52, height: 52, borderRadius: 26, background: "#26272B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <BookOpen size={22} color="#71727A" />
+        </div>
+      )}
+      <span style={{
+        fontFamily: "'Anton', sans-serif", fontSize: 12.5, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.02em",
+        lineHeight: 1.2, textAlign: "center", wordBreak: "break-word", overflow: "hidden",
+        display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
+      }}>
+        {p.titulo || "Sem título"}
+      </span>
+    </button>
+  );
+}
+
+// Conteúdo completo do protocolo (abre ao tocar no mini-card)
+function ProtocoloDetalhe({ p, onFechar, onEditar, onCompartilhar, onVoltar }) {
+  const tags = (p.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
+  return (
+    <Sheet title={p.titulo || "Protocolo"} onClose={onFechar}>
+      {onVoltar && (
+        <button onClick={onVoltar} style={{ background: "none", border: "none", color: "#E4DE00", fontSize: 13, fontWeight: 700, padding: 0, marginBottom: 12, display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+          <ArrowLeft size={14} /> Voltar
+        </button>
+      )}
+      {(p.icone || p.duracao || p.objetivo) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          {p.icone && <IconeProtocolo id={p.icone} size={56} />}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {p.duracao && <Badge>{p.duracao}</Badge>}
+            {p.objetivo && <Badge>{p.objetivo}</Badge>}
+          </div>
+        </div>
+      )}
+      {p.resumo && <div style={{ fontSize: 14.5, color: "#D8D8D3", lineHeight: 1.55 }}>{p.resumo}</div>}
+      {tags.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+          {tags.map((t) => <Badge key={t}>{t}</Badge>)}
+        </div>
+      )}
+      {p.descricao && (
+        <div style={{ fontSize: 13.5, color: "#D8D8D3", whiteSpace: "pre-wrap", marginTop: 16, paddingTop: 16, borderTop: "1px solid #26272B", lineHeight: 1.6 }}>{p.descricao}</div>
+      )}
+      {(p.criadoEm || p.atualizadoEm) && (
+        <div style={{ fontSize: 11, color: "#5f6066", marginTop: 14 }}>
+          {p.criadoEm && `Criado em ${formatarDataHora(p.criadoEm)}`}
+          {p.atualizadoEm && p.atualizadoEm !== p.criadoEm && ` · Editado em ${formatarDataHora(p.atualizadoEm)}`}
+        </div>
+      )}
+      {(onCompartilhar || onEditar) && (
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          {onCompartilhar && <GhostButton onClick={() => onCompartilhar(p)} style={{ flex: 1 }}><Share2 size={14} /> Compartilhar</GhostButton>}
+          {onEditar && <GhostButton onClick={() => onEditar(p)} style={{ flex: 1 }}><Pencil size={14} /> Editar</GhostButton>}
+        </div>
+      )}
+      {onVoltar && (
+        <GhostButton onClick={onVoltar} style={{ width: "100%", marginTop: 16 }}><ArrowLeft size={14} /> Voltar</GhostButton>
+      )}
+    </Sheet>
+  );
+}
+
 function ProtocolosTab({ senha, onToast }) {
   const [protocolos, setProtocolos] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -2415,6 +2530,7 @@ function ProtocolosTab({ senha, onToast }) {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [expandidoId, setExpandidoId] = useState(null);
+  const [detalheId, setDetalheId] = useState(null);
   const { pedir, Modal } = useSenhaGate(senha);
 
   const carregar = useCallback(async () => {
@@ -2436,7 +2552,7 @@ function ProtocolosTab({ senha, onToast }) {
   useEffect(() => { carregar(); }, [carregar]);
 
   const abrirNovo = () => pedir(() => { setEditando(null); setErro(""); setSheetAberto(true); });
-  const abrirEdicao = (p) => pedir(() => { setEditando(p.id); setErro(""); setSheetAberto(true); });
+  const abrirEdicao = (p) => pedir(() => { setDetalheId(null); setEditando(p.id); setErro(""); setSheetAberto(true); });
   // Exclusão só existe dentro da tela de edição (que já exige a senha)
   const excluirDaEdicao = () => pedir(async () => {
     if (!editando || !window.confirm("Excluir este protocolo? Essa ação não pode ser desfeita.")) return;
@@ -2506,17 +2622,19 @@ function ProtocolosTab({ senha, onToast }) {
           {listaExibida.length === 0 && (
             <EmptyState text={buscaAtiva ? "Nenhum protocolo encontrado para essa busca." : "Nenhum protocolo criado ainda. Toque em 'Novo protocolo'."} />
           )}
-          {listaExibida.map((p) => (
-            <ProtocoloCard
-              key={p.id}
-              p={p}
-              expandido={expandidoId === p.id}
-              onToggle={() => setExpandidoId(expandidoId === p.id ? null : p.id)}
-              onEditar={abrirEdicao}
-              onCompartilhar={compartilhar}
-            />
-          ))}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            {listaExibida.map((p) => <ProtocoloMini key={p.id} p={p} onAbrir={setDetalheId} />)}
+          </div>
         </>
+      )}
+
+      {detalheId && protocolos.find((p) => p.id === detalheId) && (
+        <ProtocoloDetalhe
+          p={protocolos.find((p) => p.id === detalheId)}
+          onFechar={() => setDetalheId(null)}
+          onEditar={abrirEdicao}
+          onCompartilhar={compartilhar}
+        />
       )}
 
       {Modal}
@@ -2635,6 +2753,7 @@ function ProgramacaoForm({ inicial, protocolos, onSalvar, onCancelar, salvando }
 }
 
 function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onExcluir, onValidar, senha }) {
+  const abrirProtocolo = useContext(ProtocoloViewerContext);
   const { pedir, Modal } = useSenhaGate(senha);
 
   const alternar = () => {
@@ -2722,8 +2841,13 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
                 const status = (d.validacao || {})[pid];
                 return (
                   <div key={pid} style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6 }}>
-                    {pr.icone && <IconeProtocolo id={pr.icone} size={22} />}
-                    <span style={{ flex: 1, fontSize: 13, color: "#F1EFE9", fontWeight: 700 }}>{pr.titulo || "Protocolo sem título"}</span>
+                    <button
+                      onClick={() => abrirProtocolo && abrirProtocolo(pr)}
+                      style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 7, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
+                    >
+                      {pr.icone && <IconeProtocolo id={pr.icone} size={22} />}
+                      <span style={{ fontSize: 13, color: "#F1EFE9", fontWeight: 700, textDecoration: "underline", textDecorationColor: "#E4DE0066", textUnderlineOffset: 3 }}>{pr.titulo || "Protocolo sem título"}</span>
+                    </button>
                     <button onClick={() => onValidar(item, d.dia, pid, "sim")} title="Aconteceu" style={botaoValidar(status === "sim", "#4CAF6D")}><Check size={16} /></button>
                     <button onClick={() => onValidar(item, d.dia, pid, "nao")} title="Não aconteceu" style={botaoValidar(status === "nao", "#E6483F")}><X size={16} /></button>
                   </div>
@@ -2747,6 +2871,7 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
 
 // Gráfico: protocolos que realmente aconteceram, mês a mês
 function GraficoProtocolosMes({ programacoes, protocolos }) {
+  const abrirProtocolo = useContext(ProtocoloViewerContext);
   const [mesSel, setMesSel] = useState("");
 
   // dados[mes][protocoloId] = { sim, nao }
@@ -2816,8 +2941,13 @@ function GraficoProtocolosMes({ programacoes, protocolos }) {
               return (
                 <div key={l.pid} style={{ marginTop: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    {pr && pr.icone && <IconeProtocolo id={pr.icone} size={20} />}
-                    <span style={{ flex: 1, fontSize: 13, color: "#F1EFE9", fontWeight: 700 }}>{pr ? (pr.titulo || "Protocolo sem título") : "Protocolo removido"}</span>
+                    <button
+                      onClick={() => pr && abrirProtocolo && abrirProtocolo(pr)}
+                      style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 7, background: "none", border: "none", padding: 0, cursor: pr ? "pointer" : "default", textAlign: "left" }}
+                    >
+                      {pr && pr.icone && <IconeProtocolo id={pr.icone} size={20} />}
+                      <span style={{ fontSize: 13, color: "#F1EFE9", fontWeight: 700, textDecoration: pr ? "underline" : "none", textDecorationColor: "#E4DE0066", textUnderlineOffset: 3 }}>{pr ? (pr.titulo || "Protocolo sem título") : "Protocolo removido"}</span>
+                    </button>
                     <span style={{ fontSize: 13, fontWeight: 800, color: "#E4DE00" }}>{l.sim}×</span>
                   </div>
                   <div style={{ height: 7, background: "#26272B", borderRadius: 4, marginTop: 5, overflow: "hidden" }}>
@@ -3593,7 +3723,7 @@ export default function App() {
   }, []);
 
   if (viewAvaliacao) return <AvaliacaoPage onVoltar={() => { window.location.hash = ""; setViewAvaliacao(false); }} />;
-  if (viewOnlyId) return <ViewOnlyWorkout id={viewOnlyId} legendas={legendas} />;
+  if (viewOnlyId) return <ProtocoloViewerProvider><ViewOnlyWorkout id={viewOnlyId} legendas={legendas} /></ProtocoloViewerProvider>;
   if (viewOnlyProtocoloId) {
     return (
       <ViewOnlyProtocolo
@@ -3612,6 +3742,7 @@ export default function App() {
 
   return (
     <SessaoContext.Provider value={{ desbloqueadoAte, estender: estenderSessao }}>
+    <ProtocoloViewerProvider>
     <div onFocus={rolarCampoParaVisivel} style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
       <style>{FONT_IMPORT}</style>
 
@@ -3661,6 +3792,7 @@ export default function App() {
 
       <BarraAbas abas={abas} aba={aba} setAba={setAba} senha={senha} />
     </div>
+    </ProtocoloViewerProvider>
     </SessaoContext.Provider>
   );
 }
