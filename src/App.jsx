@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
-  ClipboardList, AlertCircle, BarChart3
+  ClipboardList, AlertCircle, BarChart3, Copy
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -1510,7 +1510,7 @@ function SeloProtocolo({ protocolo }) {
   );
 }
 
-function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onToggle, legendas, destaque, senha, protocolo }) {
+function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, expandido, onToggle, legendas, destaque, senha, protocolo }) {
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
     <div style={{
@@ -1546,10 +1546,11 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, expandido, onTogg
       {expandido && (
         <div style={{ padding: "0 16px 16px", borderTop: "1px solid #2E2F34" }}>
           <WorkoutDetalhes w={w} legendas={legendas} />
-          <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-            <GhostButton onClick={() => onCompartilhar(w)} style={{ flex: 1 }}><Share2 size={14} /> Compartilhar</GhostButton>
-            <GhostButton onClick={() => onEditar(w)} style={{ flex: 1 }}><Pencil size={14} /> Editar</GhostButton>
-            <GhostButton onClick={() => onExcluir(w.id)} style={{ flex: 1 }}><Trash2 size={14} /> Excluir</GhostButton>
+          <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+            <GhostButton onClick={() => onCompartilhar(w)} style={{ flex: "1 1 40%" }}><Share2 size={14} /> Compartilhar</GhostButton>
+            <GhostButton onClick={() => onDuplicar(w)} style={{ flex: "1 1 40%" }}><Copy size={14} /> Duplicar</GhostButton>
+            <GhostButton onClick={() => onEditar(w)} style={{ flex: "1 1 40%" }}><Pencil size={14} /> Editar</GhostButton>
+            <GhostButton onClick={() => onExcluir(w.id)} style={{ flex: "1 1 40%" }}><Trash2 size={14} /> Excluir</GhostButton>
           </div>
         </div>
       )}
@@ -1803,6 +1804,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
 
   const [sheetAberto, setSheetAberto] = useState(false);
   const [editando, setEditando] = useState(null);
+  const [copiaInicial, setCopiaInicial] = useState(null); // treino duplicado, ainda não salvo
   const [salvandoTreino, setSalvandoTreino] = useState(false);
   const [expandidoId, setExpandidoId] = useState(null);
   const [protocolos, setProtocolos] = useState([]);
@@ -1874,8 +1876,26 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setCarregandoMais(false);
   };
 
-  const abrirNovoTreino = () => pedir(() => { setEditando(null); setSheetAberto(true); });
-  const abrirEdicaoTreino = (w) => pedir(() => { setEditando(w.id); setSheetAberto(true); });
+  const abrirNovoTreino = () => pedir(() => { setEditando(null); setCopiaInicial(null); setSheetAberto(true); });
+  const abrirEdicaoTreino = (w) => pedir(() => { setEditando(w.id); setCopiaInicial(null); setSheetAberto(true); });
+  const fecharSheetTreino = () => { setSheetAberto(false); setEditando(null); setCopiaInicial(null); };
+  // Duplicar: abre o formulário já preenchido com o conteúdo do treino (sem resultados, data de hoje).
+  // Só é gravado como treino novo (com código novo) quando você tocar em Salvar.
+  const duplicarTreino = (w) => pedir(() => {
+    setEditando(null);
+    setCopiaInicial({
+      nome: `${w.nome || "Treino"} (cópia)`,
+      data: dataISOLocal(new Date()),
+      categoria: w.categoria || "",
+      protocoloId: w.protocoloId || "",
+      tags: w.tags || "",
+      warmupGeral: w.warmupGeral || "",
+      warmupEspecifico: w.warmupEspecifico || "",
+      skill: w.skill || "",
+      blocos: (w.blocos || []).map((b) => ({ ...b, id: uid(), resultado: "", resultadoData: null })),
+    });
+    setSheetAberto(true);
+  });
   const abrirTodos = () => pedir(() => { setModoTodos(true); carregarPrimeiraPagina(); });
   const voltarRecentes = () => setModoTodos(false);
 
@@ -1899,8 +1919,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       await inserirWorkoutDb(form);
     }
     setSalvandoTreino(false);
-    setSheetAberto(false);
-    setEditando(null);
+    fecharSheetTreino();
     await recarregarTudo();
   };
 
@@ -2002,6 +2021,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               key={w.id} w={w} expandido={expandidoId === w.id}
               onToggle={() => setExpandidoId(expandidoId === w.id ? null : w.id)}
               onEditar={abrirEdicaoTreino}
+              onDuplicar={duplicarTreino}
               onExcluir={excluir} onCompartilhar={compartilhar} legendas={legendas}
               destaque={w.id === bannerWorkoutId}
               senha={senha}
@@ -2024,11 +2044,16 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       {Modal}
 
       {sheetAberto && (
-        <Sheet title={editando ? "Editar treino" : "Novo treino"} onClose={() => { setSheetAberto(false); setEditando(null); }}>
+        <Sheet title={editando ? "Editar treino" : copiaInicial ? "Treino duplicado" : "Novo treino"} onClose={fecharSheetTreino}>
+          {copiaInicial && (
+            <div style={{ fontSize: 12.5, color: "#E4DE00", background: "rgba(228,222,0,0.08)", border: "1px solid rgba(228,222,0,0.3)", borderRadius: 8, padding: "8px 10px", marginBottom: 14, lineHeight: 1.4 }}>
+              Cópia pronta para editar. Ajuste o que precisar e toque em Salvar para criar o treino novo.
+            </div>
+          )}
           <WorkoutForm
-            inicial={editando ? treinoEmEdicao : null}
+            inicial={editando ? treinoEmEdicao : copiaInicial}
             onSalvar={salvar}
-            onCancelar={() => { setSheetAberto(false); setEditando(null); }}
+            onCancelar={fecharSheetTreino}
             legendas={legendas}
             salvando={salvandoTreino}
             protocolos={protocolos}
