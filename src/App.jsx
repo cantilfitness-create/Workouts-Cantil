@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useContext } from "react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, useContext } from "react";
 import {
   Dumbbell, ListChecks, Plus, X, Search,
   ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
-  ClipboardList, AlertCircle, BarChart3, Copy
+  ClipboardList, AlertCircle, BarChart3, Copy, Folder
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -398,6 +398,10 @@ async function fetchProtocoloById(id) {
   return protocoloFromDb(data);
 }
 
+// Pasta padrão: tudo o que já existia fica aqui. Outras pastas = programações de outra pessoa ou lugar.
+const PASTA_CT = "TREINO CT CANTIL";
+const pastaDe = (p) => (p.pasta || "").trim() || PASTA_CT;
+const mesmaPasta = (a, b) => normalizarTexto(a) === normalizarTexto(b);
 const DIAS_SEMANA = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"];
 const NOMES_DIA = { SEG: "Segunda", TER: "Terça", QUA: "Quarta", QUI: "Quinta", SEX: "Sexta", "SÁB": "Sábado", DOM: "Domingo" };
 // Objetivos / aptidões que aparecem ao lado de cada exercício (dá para digitar outro em "Outro…")
@@ -407,24 +411,70 @@ const APTIDOES = [
 ];
 // Na tela de edição, só os 3 últimos exercícios de cada dia ficam à vista; os anteriores ficam numa aba que se abre ao tocar
 const LIMITE_VISIVEL = 3;
+// Tira do começo da linha o que é quantidade ("40x ", "200 M ", "2-3 20 x ", "G1- ") e deixa só o nome do exercício
+const PREFIXO_QTD = /^\s*(?:[A-Za-z]\d+\s*[-–.)]\s*)?(?:\d[\d.,\-–/']*\s*(?:[xX×]\s*)?(?:(?:km|min|seg|reps?|cal|m|s)\b\s*)?)*/i;
+const limparNome = (t) => normalizarTexto(t).replace(/[^a-z0-9]+/g, " ").trim();
+
+// Último objetivo usado em cada exercício nas programações (para pré-preencher)
+function construirMapaObjetivos(programacoes) {
+  const mapa = {};
+  [...programacoes]
+    .sort((x, y) => (dataRefProgramacao(x) || 0) - (dataRefProgramacao(y) || 0))
+    .forEach((pr) => pr.dias.forEach((d) => exerciciosDoDia(d).forEach((e) => {
+      if (e.objetivo) mapa[limparNome(e.nome)] = e.objetivo;
+    })));
+  return mapa;
+}
+
+// Reconhece, no texto do treino, os exercícios que existem na biblioteca
+function extrairExerciciosDoTreino(w, biblioteca, mapaObjetivos) {
+  const fontes = [
+    { texto: w.warmupGeral, padrao: "Aquecimento" },
+    { texto: w.warmupEspecifico, padrao: "Aquecimento" },
+    { texto: w.skill, padrao: "Skill" },
+    ...(w.blocos || []).map((b) => ({ texto: b.conteudo, padrao: "" })),
+  ];
+  const nomes = biblioteca
+    .map((b) => ({ nome: b.nome, n: limparNome(b.nome) }))
+    .filter((x) => x.n)
+    .sort((a, b) => b.n.length - a.n.length); // nomes maiores primeiro
+  const vistos = new Set();
+  const saida = [];
+  fontes.forEach(({ texto, padrao }) => String(texto || "").split("\n").forEach((linha) => {
+    const pre = (PREFIXO_QTD.exec(linha) || [""])[0];
+    const resto = ` ${limparNome(linha.slice(pre.length))} `;
+    if (resto.trim() === "") return;
+    // aceita singular/plural ("squat" e "squats") quando o nome tem 4+ letras
+    const achado = nomes.find((x) => [x.n, ...(x.n.length >= 4 ? [`${x.n}s`, x.n.replace(/s$/, "")] : [])].some((v) => resto.includes(` ${v} `)));
+    if (!achado || vistos.has(achado.n)) return;
+    vistos.add(achado.n);
+    saida.push({ nome: achado.nome, objetivo: padrao || mapaObjetivos[achado.n] || "" });
+  }));
+  return saida;
+}
+
 function diasVazios() {
   return DIAS_SEMANA.map((dia) => ({ dia, exercicios: [] }));
 }
 const exerciciosDoDia = (d) => (Array.isArray(d.exercicios) ? d.exercicios : []);
-const diaTemConteudo = (d) => exerciciosDoDia(d).length > 0;
+const treinosDoDia = (d) => (Array.isArray(d.treinos) ? d.treinos : []);
+const diaTemConteudo = (d) => exerciciosDoDia(d).length > 0 || treinosDoDia(d).length > 0;
 // Junta textos iguais ignorando maiúsculas e acentos (para contar nos gráficos)
 const normalizarTexto = (t) => String(t || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const programacaoFromDb = (r) => ({
   id: r.id, nome: r.nome || "", destaque: !!r.destaque, descricao: r.descricao || "",
   semanaInicio: r.semana_inicio || "",
+  pasta: r.pasta || "",
   dias: Array.isArray(r.dias) && r.dias.length === DIAS_SEMANA.length ? r.dias : diasVazios(),
   criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
 });
 const programacaoToDb = (p) => ({ nome: p.nome || "", destaque: !!p.destaque, descricao: p.descricao || "",
   semana_inicio: p.semanaInicio || null,
+  pasta: (p.pasta || "").trim(),
   dias: p.dias.map((d) => ({
     dia: d.dia,
     exercicios: exerciciosDoDia(d).map((e) => ({ nome: e.nome, objetivo: e.objetivo || "" })),
+    treinos: treinosDoDia(d), // treinos marcados como "executado hoje" naquele dia
   })),
 });
 
@@ -433,16 +483,16 @@ async function fetchProgramacoes() {
   if (error) { console.error(error); return []; }
   return data.map(programacaoFromDb);
 }
-// Se colunas novas (semana_inicio, descricao) ainda não existem no banco, tenta salvar sem elas
+// Se colunas novas (pasta, semana_inicio, descricao) ainda não existem no banco, tenta salvar sem elas
 async function gravarProgramacao(executar, payload) {
-  let { data, error } = await executar(payload);
-  if (error) {
-    const { semana_inicio, ...p1 } = payload;
-    ({ data, error } = await executar(p1));
-    if (error) {
-      const { descricao, ...p2 } = p1;
-      ({ data, error } = await executar(p2));
-    }
+  const { pasta, ...semPasta } = payload;
+  const { semana_inicio, ...semPastaSemData } = semPasta;
+  const { descricao, ...minimo } = semPastaSemData;
+  let data = null;
+  let error = null;
+  for (const tentativa of [payload, semPasta, semPastaSemData, minimo]) {
+    ({ data, error } = await executar(tentativa));
+    if (!error) break;
   }
   if (error) { console.error(error); return null; }
   return programacaoFromDb(data);
@@ -862,17 +912,28 @@ function Spinner({ label = "Carregando..." }) {
 /* ---------------------------- proteção por senha (reutilizável) ---------------------------- */
 
 const DURACAO_SESSAO_MS = 5 * 60 * 1000;
-const SessaoContext = React.createContext({ desbloqueadoAte: 0, estender: () => {} });
+const SessaoContext = React.createContext({ liberado: () => false, estender: () => {} });
+// Guarda só o horário limite (nunca a senha) para sobreviver a um recarregamento da página
+const CHAVE_DESBLOQUEIO = "cantil_desbloqueio_ate";
+function lerDesbloqueioSalvo() {
+  try {
+    const v = Number(window.sessionStorage.getItem(CHAVE_DESBLOQUEIO));
+    return v > Date.now() ? v : 0;
+  } catch { return 0; }
+}
+function salvarDesbloqueio(v) {
+  try { window.sessionStorage.setItem(CHAVE_DESBLOQUEIO, String(v)); } catch { /* ignora */ }
+}
 
 function useSenhaGate(senhaCorreta) {
-  const { desbloqueadoAte, estender } = useContext(SessaoContext);
+  const { liberado, estender } = useContext(SessaoContext);
   const [aberto, setAberto] = useState(false);
   const [valor, setValor] = useState("");
   const [erro, setErro] = useState(false);
   const acaoRef = useRef(null);
 
   const pedir = (acao) => {
-    if (Date.now() < desbloqueadoAte) {
+    if (liberado()) {
       estender();
       acao();
       return;
@@ -900,7 +961,7 @@ function useSenhaGate(senhaCorreta) {
     <Sheet title="Senha necessária" onClose={() => setAberto(false)}>
       <div style={{ fontSize: 13, color: "#B9BABF", marginBottom: 14, display: "flex", gap: 8, alignItems: "flex-start" }}>
         <Lock size={16} color="#E4DE00" style={{ flexShrink: 0, marginTop: 1 }} />
-        Só quem tem a senha pode fazer essa alteração. Depois de digitar, fica liberado por 5 minutos sem precisar digitar de novo.
+        Só quem tem a senha pode fazer essa alteração. Depois de digitar, fica liberado enquanto você estiver usando o app. A senha só volta a ser pedida após 5 minutos sem atividade.
       </div>
       <Field label="Senha">
         <TextInput
@@ -1299,7 +1360,80 @@ function interpretarTextoTreino(textoBruto) {
   return resultado;
 }
 
-function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, protocolos = [] }) {
+// Campo de texto que sugere exercícios da biblioteca enquanto você digita a linha atual
+function TextoComSugestao({ value, onChange, biblioteca = [], ...resto }) {
+  const [caret, setCaret] = useState(0);
+  const [focado, setFocado] = useState(false);
+  const alvo = useRef(null);
+  const texto = value || "";
+  const pos = Math.min(caret, texto.length);
+  const ini = pos === 0 ? 0 : texto.lastIndexOf("\n", pos - 1) + 1;
+  let fim = texto.indexOf("\n", pos);
+  if (fim === -1) fim = texto.length;
+  const linha = texto.slice(ini, fim);
+  const prefixo = (PREFIXO_QTD.exec(linha) || [""])[0];
+  const consulta = limparNome(linha.slice(prefixo.length));
+
+  let sugestoes = [];
+  if (focado && consulta.length >= 2 && biblioteca.length > 0) {
+    const cand = biblioteca.map((b) => ({ b, n: limparNome(b.nome) })).filter((x) => x.n);
+    if (!cand.some((x) => x.n === consulta)) {
+      sugestoes = cand
+        .filter((x) => x.n.includes(consulta))
+        .sort((x, y) => (x.n.startsWith(consulta) ? 0 : 1) - (y.n.startsWith(consulta) ? 0 : 1) || x.n.length - y.n.length)
+        .slice(0, 5)
+        .map((x) => x.b);
+    }
+  }
+
+  const rastrear = (e) => { alvo.current = e.target; setCaret(e.target.selectionStart || 0); };
+  const aplicar = (nome) => {
+    const novo = texto.slice(0, ini) + prefixo + nome + texto.slice(fim);
+    const novoCaret = ini + prefixo.length + nome.length;
+    onChange({ target: { value: novo } });
+    setCaret(novoCaret);
+    requestAnimationFrame(() => {
+      const el = alvo.current;
+      if (el) { el.focus(); el.setSelectionRange(novoCaret, novoCaret); }
+    });
+  };
+
+  return (
+    <>
+      <AutoTextArea
+        {...resto}
+        value={value}
+        onChange={(e) => { onChange(e); rastrear(e); }}
+        onSelect={rastrear}
+        onKeyUp={rastrear}
+        onClick={rastrear}
+        onFocus={(e) => { setFocado(true); rastrear(e); }}
+        onBlur={() => setTimeout(() => setFocado(false), 180)}
+      />
+      {sugestoes.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, overflowX: "auto", marginTop: 6, paddingBottom: 2 }}>
+          <Sparkles size={14} color="#E4DE00" style={{ flexShrink: 0 }} />
+          {sugestoes.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => aplicar(b.nome)}
+              style={{
+                flexShrink: 0, whiteSpace: "nowrap", cursor: "pointer", borderRadius: 999, padding: "6px 12px",
+                background: "rgba(228,222,0,0.10)", color: "#E4DE00", border: "1px solid rgba(228,222,0,0.45)", fontSize: 12.5, fontWeight: 700,
+              }}
+            >
+              {b.nome}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, protocolos = [], biblioteca = [] }) {
   const [form, setForm] = useState(inicial || {
     nome: "", data: new Date().toISOString().slice(0, 10), categoria: "", protocoloId: "", tags: "",
     warmupGeral: "", warmupEspecifico: "", skill: "", blocos: [blocoVazio()],
@@ -1387,13 +1521,13 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, p
       </Field>
 
       <Field label="G-WARM UP (geral)">
-        <AutoTextArea value={form.warmupGeral} onChange={(e) => setForm({ ...form, warmupGeral: e.target.value })} placeholder="Aquecimento geral..." />
+        <TextoComSugestao biblioteca={biblioteca} value={form.warmupGeral} onChange={(e) => setForm({ ...form, warmupGeral: e.target.value })} placeholder="Aquecimento geral..." />
       </Field>
       <Field label="E-WARM UP (específico)">
-        <AutoTextArea value={form.warmupEspecifico} onChange={(e) => setForm({ ...form, warmupEspecifico: e.target.value })} placeholder="Aquecimento específico do movimento..." />
+        <TextoComSugestao biblioteca={biblioteca} value={form.warmupEspecifico} onChange={(e) => setForm({ ...form, warmupEspecifico: e.target.value })} placeholder="Aquecimento específico do movimento..." />
       </Field>
       <Field label="Skill">
-        <AutoTextArea value={form.skill} onChange={(e) => setForm({ ...form, skill: e.target.value })} placeholder="Trabalho de habilidade/técnica..." />
+        <TextoComSugestao biblioteca={biblioteca} value={form.skill} onChange={(e) => setForm({ ...form, skill: e.target.value })} placeholder="Trabalho de habilidade/técnica..." />
       </Field>
 
       <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 14, color: "#F1EFE9", textTransform: "uppercase", margin: "18px 0 8px", letterSpacing: "0.04em" }}>
@@ -1452,7 +1586,7 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, p
             <AutoTextArea value={b.objetivos} onChange={(e) => atualizarBloco(b.id, "objetivos", e.target.value)} placeholder="O que esse bloco desenvolve..." />
           </Field>
           <Field label="Conteúdo (movimentos, reps, tempo)">
-            <AutoTextArea value={b.conteudo} onChange={(e) => atualizarBloco(b.id, "conteudo", e.target.value)} placeholder={"Ex: 21-15-9\nThrusters\nPull-ups"} style={{ minHeight: 160 }} />
+            <TextoComSugestao biblioteca={biblioteca} value={b.conteudo} onChange={(e) => atualizarBloco(b.id, "conteudo", e.target.value)} placeholder={"Ex: 21-15-9\nThrusters\nPull-ups"} style={{ minHeight: 160 }} />
           </Field>
           <Field label="Resultado (opcional)">
             <AutoTextArea
@@ -1578,7 +1712,7 @@ function SeloProtocolo({ protocolo }) {
   );
 }
 
-function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, expandido, onToggle, legendas, destaque, senha, protocolo }) {
+function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExecutarHoje, execucoes = [], expandido, onToggle, legendas, destaque, senha, protocolo }) {
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
     <div style={{
@@ -1614,7 +1748,11 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, expan
       {expandido && (
         <div style={{ padding: "0 16px 16px", borderTop: "1px solid #2E2F34" }}>
           <WorkoutDetalhes w={w} legendas={legendas} />
-          <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+          {execucoes.length > 0 && (
+            <div style={{ marginTop: 14, fontSize: 12, color: "#4CAF6D", fontWeight: 700 }}>✓ Executado em {execucoes.join(", ")}</div>
+          )}
+          <div style={{ display: "flex", gap: 10, marginTop: execucoes.length > 0 ? 10 : 18, flexWrap: "wrap" }}>
+            <PrimaryButton onClick={() => onExecutarHoje(w)} style={{ flex: "1 1 100%" }}><Check size={16} /> Treino executado hoje</PrimaryButton>
             <GhostButton onClick={() => onCompartilhar(w)} style={{ flex: "1 1 40%" }}><Share2 size={14} /> Compartilhar</GhostButton>
             <GhostButton onClick={() => onDuplicar(w)} style={{ flex: "1 1 40%" }}><Copy size={14} /> Duplicar</GhostButton>
             <GhostButton onClick={() => onEditar(w)} style={{ flex: "1 1 40%" }}><Pencil size={14} /> Editar</GhostButton>
@@ -1873,6 +2011,8 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const [sheetAberto, setSheetAberto] = useState(false);
   const [editando, setEditando] = useState(null);
   const [copiaInicial, setCopiaInicial] = useState(null); // treino duplicado, ainda não salvo
+  const [biblioteca, setBiblioteca] = useState([]); // para sugerir exercícios e reconhecer o treino executado
+  const [programacoesExec, setProgramacoesExec] = useState([]);
   const [salvandoTreino, setSalvandoTreino] = useState(false);
   const [expandidoId, setExpandidoId] = useState(null);
   const [protocolos, setProtocolos] = useState([]);
@@ -1884,6 +2024,56 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const { pedir, Modal } = useSenhaGate(senha);
 
   useEffect(() => { (async () => setProtocolos(await fetchProtocolos()))(); }, []);
+  useEffect(() => {
+    (async () => {
+      setBiblioteca(await fetchExercicios());
+      setProgramacoesExec(await fetchProgramacoes());
+    })();
+  }, []);
+
+  // Datas em que cada treino foi marcado como executado (vêm das programações)
+  const execucoesPorTreino = {};
+  programacoesExec.forEach((pr) => {
+    const ref = dataRefProgramacao(pr);
+    if (!ref) return;
+    const seg = parseDataLocal(segundaDe(dataISOLocal(ref)));
+    pr.dias.forEach((d) => treinosDoDia(d).forEach((t) => {
+      const dt = new Date(seg.getFullYear(), seg.getMonth(), seg.getDate() + Math.max(0, DIAS_SEMANA.indexOf(d.dia)));
+      (execucoesPorTreino[t.id] = execucoesPorTreino[t.id] || []).push(formatarDiaMes(dt));
+    }));
+  });
+
+  // "Treino executado hoje": lança os exercícios reconhecidos do treino na programação da semana
+  // (cria a programação da semana se ainda não existir). Alimenta os gráficos da Programação.
+  const executarHoje = (w) => pedir(async () => {
+    const lista = await fetchProgramacoes();
+    const segunda = segundaDe();
+    const diaChave = DIAS_SEMANA[(new Date().getDay() || 7) - 1];
+    const prog = lista.find((pr) => {
+      const ref = dataRefProgramacao(pr);
+      return mesmaPasta(pastaDe(pr), PASTA_CT) && ref && segundaDe(dataISOLocal(ref)) === segunda;
+    });
+    const base = prog || { nome: "", destaque: false, descricao: "", semanaInicio: segunda, pasta: "", dias: diasVazios() };
+    const diaAtual = base.dias.find((d) => d.dia === diaChave) || { dia: diaChave, exercicios: [] };
+    if (treinosDoDia(diaAtual).some((t) => t.id === w.id)) {
+      if (onToast) onToast("Este treino já foi registrado hoje");
+      return;
+    }
+    const extraidos = extrairExerciciosDoTreino(w, biblioteca, construirMapaObjetivos(lista));
+    const existentes = new Set(exerciciosDoDia(diaAtual).map((e) => limparNome(e.nome)));
+    const novos = extraidos.filter((e) => !existentes.has(limparNome(e.nome)));
+    const dias = base.dias.map((d) => (d.dia !== diaChave ? d : {
+      ...d,
+      exercicios: [...exerciciosDoDia(d), ...novos],
+      treinos: [...treinosDoDia(d), { id: w.id, codigo: w.codigo, nome: w.nome }],
+    }));
+    const salvo = prog ? await atualizarProgramacaoDb(prog.id, { ...prog, dias }) : await inserirProgramacaoDb({ ...base, dias });
+    if (!salvo) { if (onToast) onToast("Não foi possível registrar o treino"); return; }
+    setProgramacoesExec(await fetchProgramacoes());
+    if (onToast) onToast(novos.length > 0
+      ? `Registrado! ${novos.length} exercício${novos.length > 1 ? "s" : ""} lançado${novos.length > 1 ? "s" : ""} na programação (${NOMES_DIA[diaChave]}).`
+      : "Registrado! Nenhum exercício novo da biblioteca foi reconhecido no texto do treino.");
+  });
 
   // O treino em destaque fica sempre no topo da lista, mesmo que seja antigo,
   // e pode ser aberto (com resultados) por qualquer pessoa, sem senha.
@@ -2090,6 +2280,8 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               onToggle={() => setExpandidoId(expandidoId === w.id ? null : w.id)}
               onEditar={abrirEdicaoTreino}
               onDuplicar={duplicarTreino}
+              onExecutarHoje={executarHoje}
+              execucoes={execucoesPorTreino[w.id] || []}
               onExcluir={excluir} onCompartilhar={compartilhar} legendas={legendas}
               destaque={w.id === bannerWorkoutId}
               senha={senha}
@@ -2125,6 +2317,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
             legendas={legendas}
             salvando={salvandoTreino}
             protocolos={protocolos}
+            biblioteca={biblioteca}
           />
         </Sheet>
       )}
@@ -3002,6 +3195,11 @@ function ProgramacaoCard({ item, expandido, onToggle, onEditar, onExcluir, senha
                   {e.objetivo && <span style={{ color: "#E4DE00", fontWeight: 600, fontSize: 12.5 }}> — {e.objetivo}</span>}
                 </div>
               ))}
+              {treinosDoDia(d).map((t) => (
+                <div key={t.id} style={{ marginTop: 6, fontSize: 11.5, color: "#4CAF6D", fontWeight: 700 }}>
+                  ✓ Treino executado: {t.nome || "Treino"}{t.codigo ? ` · #${t.codigo}` : ""}
+                </div>
+              ))}
             </div>
           ))}
           <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
@@ -3119,6 +3317,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
   const [erro, setErro] = useState("");
   const [expandidoId, setExpandidoId] = useState(null);
   const [mostrarPassadas, setMostrarPassadas] = useState(false);
+  const [pastaAberta, setPastaAberta] = useState(null); // null = lista de pastas
   const { pedir, Modal } = useSenhaGate(senha);
 
   const carregar = useCallback(async () => {
@@ -3141,7 +3340,9 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     if (salvando) return;
     setSalvando(true);
     setErro("");
-    const resultado = editando ? await atualizarProgramacaoDb(editando, form) : await inserirProgramacaoDb(form);
+    const resultado = editando
+      ? await atualizarProgramacaoDb(editando, form)
+      : await inserirProgramacaoDb({ ...form, pasta: pastaAberta === PASTA_CT ? "" : pastaAberta });
     setSalvando(false);
     if (!resultado) {
       setErro("Não consegui salvar no banco. Confirme se a tabela \"programacoes_semanais\" existe no Supabase (rode o supabase-schema.sql).");
@@ -3149,14 +3350,46 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     }
     setSheetAberto(false);
     setEditando(null);
-    if (onToast) onToast("Programação salva!");
+    if (!editando && !mesmaPasta(pastaAberta, PASTA_CT) && !resultado.pasta && onToast) {
+      onToast("Salvei, mas a pasta não: rode o SQL das pastas no Supabase (programacao_pastas.sql)");
+    } else if (onToast) {
+      onToast("Programação salva!");
+    }
     carregar();
   };
 
+  // Pastas: a padrão (CT) sempre existe; as outras aparecem quando têm ao menos uma semana salva
+  const gruposPastas = {};
+  const garantirPasta = (nome) => {
+    const k = normalizarTexto(nome);
+    if (!gruposPastas[k]) gruposPastas[k] = { chave: k, nome, semanas: 0, exercicios: 0, ultimaRef: null };
+    return gruposPastas[k];
+  };
+  garantirPasta(PASTA_CT);
+  programacoes.forEach((p) => {
+    const g = garantirPasta(pastaDe(p));
+    g.semanas++;
+    g.exercicios += p.dias.reduce((n, d) => n + exerciciosDoDia(d).length, 0);
+    const ref = dataRefProgramacao(p);
+    if (ref && (!g.ultimaRef || ref > g.ultimaRef)) g.ultimaRef = ref;
+  });
+  const pastas = Object.values(gruposPastas).sort((x, y) =>
+    x.nome === PASTA_CT ? -1 : y.nome === PASTA_CT ? 1 : x.nome.localeCompare(y.nome, "pt-BR"));
+
+  const novaPasta = () => {
+    const nome = (window.prompt("Nome da nova pasta (ex: Treino pessoal, Academia X, João):") || "").trim();
+    if (!nome) return;
+    const existente = pastas.find((pt) => mesmaPasta(pt.nome, nome));
+    setPastaAberta(existente ? existente.nome : nome);
+    if (!existente) abrirNovo(); // já abre a primeira semana da pasta nova
+  };
+  const sairDaPasta = () => { setPastaAberta(null); setBusca(""); setExpandidoId(null); setMostrarPassadas(false); };
+
+  const daPasta = pastaAberta ? programacoes.filter((p) => mesmaPasta(pastaDe(p), pastaAberta)) : [];
   const buscaAtiva = busca.trim().length > 0;
   const filtradas = buscaAtiva
-    ? programacoes.filter((p) => (p.nome || "").toLowerCase().includes(busca.trim().toLowerCase()))
-    : programacoes;
+    ? daPasta.filter((p) => (p.nome || "").toLowerCase().includes(busca.trim().toLowerCase()))
+    : daPasta;
 
   // Ao escolher um exercício, já sugere o último objetivo que você usou para ele
   const mapaObjetivos = {};
@@ -3191,16 +3424,78 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     />
   );
 
+  if (pastaAberta === null) {
+    return (
+      <div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, color: "#E4DE00", letterSpacing: "0.04em" }}>PROGRAMAÇÕES</div>
+        <div style={{ fontSize: 12, color: "#71727A", margin: "4px 0 14px", lineHeight: 1.4 }}>
+          Cada pasta tem suas próprias semanas e seus gráficos de exercícios e aptidões.
+        </div>
+        {carregando ? (
+          <Spinner label="Carregando pastas..." />
+        ) : (
+          <>
+            {pastas.map((pt) => (
+              <button
+                key={pt.chave}
+                onClick={() => setPastaAberta(pt.nome)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 12, textAlign: "left", cursor: "pointer",
+                  background: "#1A1B1E", border: "1px solid #26272B", borderLeft: "3px solid #E4DE00", borderRadius: 12,
+                  padding: "14px 14px", marginBottom: 10,
+                }}
+              >
+                <div style={{ width: 42, height: 42, borderRadius: 10, background: "rgba(228,222,0,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Folder size={22} color="#E4DE00" />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", textTransform: "uppercase" }}>{pt.nome}</div>
+                  <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 4 }}>
+                    {pt.semanas} semana{pt.semanas === 1 ? "" : "s"} · {pt.exercicios} exercício{pt.exercicios === 1 ? "" : "s"}
+                    {pt.ultimaRef ? ` · última: ${formatarDiaMes(pt.ultimaRef)}` : ""}
+                  </div>
+                </div>
+                <ChevronRight size={18} color="#71727A" />
+              </button>
+            ))}
+            <button
+              onClick={novaPasta}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer",
+                background: "none", border: "1px dashed #3A3B40", borderRadius: 12, padding: "14px", color: "#9A9A94", fontSize: 13.5, fontWeight: 600,
+              }}
+            >
+              <Plus size={16} /> Nova pasta (outra pessoa ou lugar)
+            </button>
+          </>
+        )}
+        {Modal}
+      </div>
+    );
+  }
+
   return (
     <div>
+      <button onClick={sairDaPasta} style={{ background: "none", border: "none", color: "#E4DE00", fontSize: 13, fontWeight: 700, padding: 0, marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+        <ArrowLeft size={14} /> Pastas
+      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <Folder size={20} color="#E4DE00" />
+        <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#FFFFFF", letterSpacing: "0.04em", textTransform: "uppercase" }}>{pastaAberta}</span>
+      </div>
       {(() => {
         const w = semanaDoAno();
         return (
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, color: "#E4DE00", letterSpacing: "0.04em", marginBottom: 10 }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#E4DE00", letterSpacing: "0.04em", marginBottom: 10 }}>
             SEMANA {w.semana}/{w.total}
           </div>
         );
       })()}
+      {daPasta.length === 0 && !mesmaPasta(pastaAberta, PASTA_CT) && (
+        <div style={{ fontSize: 12, color: "#FF8A3D", marginBottom: 10, lineHeight: 1.4 }}>
+          Pasta nova. Ela só é guardada depois que você salvar a primeira semana.
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <div style={{ fontSize: 12, color: "#71727A", display: "flex", alignItems: "center", gap: 5 }}>
           <Lock size={12} /> Detalhes protegidos por senha
@@ -3232,7 +3527,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
             </div>
           )}
           {atuais.map(renderCard)}
-          <GraficosProgramacao programacoes={programacoes} />
+          <GraficosProgramacao programacoes={daPasta} />
 
           {passadas.length > 0 && (
             <div style={{ marginTop: 18 }}>
@@ -3827,8 +4122,25 @@ export default function App() {
   const [legendas, setLegendas] = useState({});
   const [banner, setBanner] = useState(null);
   const [senha, setSenha] = useState(SENHA_PADRAO);
-  const [desbloqueadoAte, setDesbloqueadoAte] = useState(0);
-  const estenderSessao = useCallback(() => setDesbloqueadoAte(Date.now() + DURACAO_SESSAO_MS), []);
+  // Sessão da senha: renova a cada toque/rolagem/tecla; expira após 5 min SEM usar o app
+  const desbloqueioRef = useRef(lerDesbloqueioSalvo());
+  const sessao = useMemo(() => ({
+    liberado: () => Date.now() < desbloqueioRef.current,
+    estender: () => { desbloqueioRef.current = Date.now() + DURACAO_SESSAO_MS; salvarDesbloqueio(desbloqueioRef.current); },
+  }), []);
+  useEffect(() => {
+    let ultimo = 0;
+    const marcar = () => {
+      const agora = Date.now();
+      if (agora >= desbloqueioRef.current || agora - ultimo < 1000) return; // já expirou, ou renovou há pouco
+      ultimo = agora;
+      desbloqueioRef.current = agora + DURACAO_SESSAO_MS;
+      salvarDesbloqueio(desbloqueioRef.current);
+    };
+    const eventos = ["pointerdown", "touchstart", "keydown", "scroll", "click"];
+    eventos.forEach((ev) => window.addEventListener(ev, marcar, { passive: true, capture: true }));
+    return () => eventos.forEach((ev) => window.removeEventListener(ev, marcar, { capture: true }));
+  }, []);
   const [toast, setToast] = useState("");
   const [viewOnlyId, setViewOnlyId] = useState(parseHashWorkoutId());
   const [viewOnlyProtocoloId, setViewOnlyProtocoloId] = useState(parseHashProtocoloId());
@@ -3880,7 +4192,7 @@ export default function App() {
   ];
 
   return (
-    <SessaoContext.Provider value={{ desbloqueadoAte, estender: estenderSessao }}>
+    <SessaoContext.Provider value={sessao}>
     <ProtocoloViewerProvider>
     <div onFocus={rolarCampoParaVisivel} style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
       <style>{FONT_IMPORT}</style>
