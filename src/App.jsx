@@ -118,7 +118,7 @@ function formatarDataHora(iso) {
 /* ---------------------------- mapeamento banco <-> app ---------------------------- */
 
 /* ---------------------------- ícones dos protocolos ---------------------------- */
-// 21 ícones Cantil Fitness (os 3 últimos: Core, Habilidades e 1% Todo Dia) (escolhidos em cada protocolo) — imagens pequenas para economizar espaço
+// 25 ícones Cantil Fitness (os últimos: Core, Habilidades, 1% Todo Dia, Flow, Competitivo, Core Training e Skill) (escolhidos em cada protocolo) — imagens pequenas para economizar espaço
 const ICONES_PROTOCOLO = [
   {"id": "strength", "nome": "Strength", "sub": "Força e resistência muscular", "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQBAMAAAB8P++eAAAAMFBMVEXz8QDs5gDj3QDj3gC2tgB/fwD/fwD/sQD/AAAA/wAAAADj3QAAAAAAAAAAAAAAAAAoBdV1AAAADHRSTlMM9l+cAwICAwEBAPzhXuqTAAADc0lEQVR42o2XP2wbdRTHv+e4Tvpbcl4CBEGvA6JkcpcOnVxVYshCphNUtH6JqKluihhQ26nqUEGnDtW1BJG+mFBVNyAvZCqShcQfMUUMpgIJDiGFkIEey4t7ce8Y7rCdxPf75SRLPuvj7/u9977v97uzAuy/iLPPwat84F78q+Gr/mEO1gFFeiECni3XDoGlg4rR9L927Y4xtExat9G7DyOozv/tOn+8sQxj6OSf6p4d3jGD34SKIWZQpM3gubZZseUB2NowJlNOAIAjo6KVMIDbgVHx2OXXd5ieKjL3+qcX5cTdY+ZkgsnK0vVvYQYR23DrRwEr4dSYFY5xzzgvjlVEcFQQDGDDJUN5AAHqMj8vBlDRJKPTeVbbDdkQ2oFzRr78bXvFtMYItzotLzjeJFMyitgCfMeQTP0vlOgcANT1ip0I1hcdBsKOoTzA6jUAcBy9ouyQ2m4RqGvrFdeTa0hTSLpeMbjnkiBogGabpjrOO5CzQLduAMUNoUJmm1yDYkkBDDXhBnqwbOU1qt56aGhh3kj+c+FIINQjr60F00FaTvtIisaZSQaxuws6sI98YEnmIq1iOXM2zajtCzpwKq9jbxNWXwf2UgYAeaVFiRfqQmcytHwRCjd0LVzyst8nZd98HVZcy8pennCwpXP4w585r2akWDSKj7PiTaAeYinW7OHxV1mVmlCwysWK5VZWb18ASvrFYLORfzkr90S7Ndfy3a7LP0QaMG7t5NaxLvsteFQE9i0AcAHwa/WGRvHHSwzIHAGw8RacehHIDgB6HwA+9NpsdwqTsQFJr8wAynx8UCybBCxJiSIdKKnPawKAPsPI1OwHkzjE4oqnHkUEsPeUi8DeqpIpl3HhgSClNwOvyBTe7ixNK6DS3CX+OH53vWCNfd9m6wYD8NeA7sZ6UdbxopJTWbgrvipxYXkCh/Fd1gwfOO5REfh1BE+NHC8LBTOz98nL6PlZS6gaFHdmr0TyPAunlK1vIcV5j/2b5KNdNK40na5U/t+ZZ+CERYqM4THkfkCFMxM01K/Du4s8W3AWytvfy6dDGzKV4vY4U8gvjf1mVatntmiMojpls7yDQd8moJ7c9w4/2Qud3hG8NHiIkUUbOPlk8Mdh6M9DOVl1hkZ4UHXU77UxoZ9Xk6ujK8RHQtgc/1LhlkfOSXmvMuqz/wDr8zV2mpR5YgAAAABJRU5ErkJggg=="},
   {"id": "run", "nome": "Run Funcional", "sub": "Corrida + exercícios", "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQBAMAAAB8P++eAAAAMFBMVEXs5gD08gDj3QDk3gC2tgD8ugB/fwD/fwCh5QD/AAAAAADj3QAAAAAAAAAAAAAAAACExpHyAAAADHRSTlP3C16fAwQCAgQBAP1eMAE3AAAFHElEQVR42o2WT2wUVRzHP7NbNj4nkfUCLYlQTYjAqTXR1hseNshtZBMqaSL14mxNLFNqKYMxCgemQIChVHFiQpsYCJAgLzHB4MTEmyGRUD2YkIr0IsQodTR5Pihd1sPstjP7hzqn+b188/39fd/3My7R4tOuz6NRv2YaLYHog5WHnqhZbS1hzoZfybrUKDMtCSdmw7B8T6/I6P4LhNsmWYmxKy8BKisCZ/KAulJeEVj/tXYdpe3mydiWZPX/ANoB2zkMmNumngDU04GN8fwsoJ4U4zfu4OBfl+ZvSBRWu9uy13agD902VQhYKvPFqlZALUoPlSkB1MF/fs0HLWJcuHh93gyrxu++47eIUe97834oq4bZEeO03Qh0x0+Yy9aN321Au4FTH6N2NszKhK0ORD7oU3tEPTBTklAwa2BlREI7G2a2RH7atfuhRBXosmpRvtFGdmJW5uti1ONzKF569rdl94vxyNWVx82ZFNf6HF4+ylIehq65FFDru6F6fNTuWj4yyrY4VSLamnY9YWJ1nA8GZ6q2RXkk8I6r4p/fpRinb0rV7QidreEU8t3S+pnMWk+kGG91UnRdKMe5KN0FYn5GbvJFKmutZwo9tg9Gf0zYHmHeNsPimJNu4cUJM2MLYKg6Bccii1Cqx7H+LAF133G1yfXBjS+06t0zAWB1tKXH7Ksf/siMCUCvAVDFs+6FjaCMqk7VGO2dc+d6rwGajwF40fX7RiysDjc9j0HJ5Ps80HaqH8AaA4Y2Fl72/NSEv7c4byIj4NzPMYETIHZdfGm0NuRVxuxz3QprFejv5ySgrnAGes7stxv00c1bmUdxHwGOBIM24l27/nItZJn86LaI8m5OApj7Dt0Jvt7+ab2k6NyNXeuP5P7O03W3NhB47jJfzbUzTvnO/mIW+qqjE4byphc49UBxwgzlicdldHZpus3w5gHPSQMXvFmJyebr8G1iPsNfjnhpYLma+xxtr/UnkPLWqJNKJrsk6aP/Jm+lefngqylGI/6PZrSOZAr5Y08KuDikAEv72bjcqlCo3a50HYVYXQiVMcnVqxKg2HWsAKZMPDPVgnucVMWOUT/qBFCPh3e+AM/EFzsFFI739lpPMLATgM1uAA/eAnUlquu15wba9TWx57PChg0m4HYO1EmzdoSPHn4oQR3ND7BQKUnUjinRVMMXKiUJhWeFj5P7HApbIr+php//WYIyfAH6LihjTDTVcLtvDrA2u1D2w+pfI2NlOHjHrNEsGJYkkyBMMA77pWkJxY5rgDMEhU0Xmz2a2ts33y8pbBkTgMh9rjIHcgngUtZ25n4IasfU9a2g2R0W1uE3YxRrLgDWFjeWJFMZR3PN3ms9PgjK6h7JxWouC+vODzQDjiwCVrc7PQDY/u56wqWsX+mUqG73vQFAB3tNq+N801VB9+2GHRfOnAZwH94PX/dE0y3luz0mhU32YKzR90O+dJqvM9c6pcqMxcLQNmGC5TcD2vb4bGJ/qDTbNdqAhYB3KPQOVqNadFTysiQYcyU3OmfsrRGKXXmLSraRURvz86a1blm6enp2Q7kR6BqmZFuiHMLpxHj/kwbXngLVey35cEeWcbIxxuwp4F5yufNPc/mw0+A6N72R/tUzydOhjVZmqrE8Pyzw4NNkx4TYe+KnbGN5Jj+wKmlH/v7h9lwjULcnNKamHF6zFlYwjqePhefWAY1LoJ0pDiwtOy2+NkCIgejp6H8A8UTpqZXW61hxnc9W3MP/A2FL6bW5uZy+AAAAAElFTkSuQmCC"},
@@ -141,6 +141,10 @@ const ICONES_PROTOCOLO = [
   {"id": "core_corpo", "nome": "Core (corpo)", "sub": "Centro do corpo em foco", "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAMAAAC5zwKfAAAAP1BMVEX18wD+/vjj3QDp4w7j3QC6ugDt6Vj/twDz8JF/fwD/fwCq/wD/AAAAAADj3QDu6AEAAAAAAAAAAAAAAAAAAAD5VolRAAAAEHRSTlMK/5vnYgP/A/8CAgMBAP39a4W4aAAAA7JJREFUeNqtWdGCrCAIPZOa09w78f9/u2qloGhtrQ/blHjiAAK5+J4PQF7HwpdEYMPAVelTCUyUxoRL4qd8MRla4zAGC54Dfiez7sNM38eAgSWteZC9sGA83HfigNNjQHwNBzTPbSgB11NHn2s4SQ2fUva1Df0feDkjEuGxU4JGlseh+4utN206hr33dQ+8/IEL2w4+uMGauJVNiOp4izjxW0C4ZkdXkj1d0X0aU9Z0DFvdRAGPq4Ax8U2GxDDyPvgH3cVawkqLRqObHlXAkrBGIyipOAdKfrGX8AKiVcJSeYUzdA1QTRVQLLheBFxXhTMUxpfxtFyBBg90GVArCWgIKxac32m0vor5EUNAWUJ2Z75f+3iTQtqNAGWN29ckrHlOl3PSkBGjEN70Mxvuu90xwKcLqBHegF7GbNdT0hC/j4hhjjYScGa6qaQhPLwLxdySPdwBzDKRNFTAUuAIZTv3AENqOF4vSEMjPDFnz68Ug0TpwjRk8jxJoJSQQhisvM/CDxmQTOkBRHVFQ3ibtlRRJkk5uaKoUEoMWsI2zuaUo9swZS7H11SAEITBIrIDmPo6p5BG1RPtUy67pQOYVGJqTBKwUDyUz1lHteHRhWVDleRdAeaYyqLzy/B9OMvMepCuAXNfma2b884cEk0YtKbLAWh3QMDqgIcNmYY7Z82GfPm+zlROcQXwn3yiAubN5mpFGg1NeYXtA9ous2PCf2tbLLufVMCy1VDZvtaH1e5l81NIDskpFP9uyYGMz6uP6LCVhjmQechPpCeHwu/DAKWGSzvjt3eQDGwjZFQ9+rpvj97ChtIsaC1V8lht3SOhGa7hLD/4BoDM/76SNq885iZX1dGWr22Elt1He+uw9yKELKKu6r7ri4/WKfKukPHqZez4AYu27rOeW34zN5ZXAFmZKXUwfFUohT1raBvKMaOaiKeIpwW8yDpeekl2dXn1sp2m2PBDA/SeV21RzImbSczFGsHts+SveYqTpSLLBhCoYMSJlOiZy/dAAiSt9/c1StUQy5czjGMrpZulu2j0vQzGcgmJhfF3tz7AS38c/SBcjluATkTKHwDK/k7e3QL0XCfv1Mj+pYacpC8WNbcpM7+C+3x0eoNh1LDIQy+ybwKyyF7vAxLfvcykGJyA4VrUOJ5uyQ7cjItxXTv9loYSwF8LxIuArjLBQxsmr354H+5uBXaqMuX0+jjRpuH5+Dh9me3Efm/59yOs4UYZHkiGue0g7n95FB4sZ4vOJoHq/yCf0ZofUW8dXNe6AFYAAAAASUVORK5CYII="},
   {"id": "habilidades", "nome": "Habilidades", "sub": "Domínio e técnica de movimentos", "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAMAAAC5zwKfAAAAP1BMVEXi3ADk3gDl3wCysgDz7QD/twB/fwD/AAAA/wD/fwAAAADj3QDt5wD//wDj3QDj3QAAAAAAAAAAAAAAAAAAAACZ/p0CAAAAEHRSTlMcYakD7QMCAQECAPz+ApTTHA89KgAAA/pJREFUeNqtWFkW4ygMFItJN0bm/rdtYfbFgD3DR15CTCGVSkIY9ONQxWcaWHwOBzz+gxoYZ1AvHk7uASKClEZKwGKx0GBo0laTm4CH5vI8T8kJpdjFGjd5lZN7gOTb6daas/CPJt3caWxL7Rag9YtZCcj8HNfvXUbN/eKLvG/nmP7CYbDGpgBEGk5Th1ngDqDqV2Pe44OFtKQl8dBXZKHCI12qLcCricAP0xZH4S/IguYJ4BE1EoWDxYQq962EPk29s/I5U6j/podos9PQEwnyGbAUDo5+BwDaxUh4cLlK0WzRDxvRiOQEN3c+mVQxoK9NbaIF4ST8lIxCM6ofp3/GEdkCKs3YoBQEEvuoKwQug4VkIraAziJbWnlUEDV8ppBspKjAgEPnU5VUlZOOQj+KRxR9I15oDz2IsqDUMBfiQDigj5zbFdWkG4o9CNFaiHjHgB6/v8YtslCOoWh8ZMoiDDm+4FZ4NlQrnF7mhRuSFW5BItcr6pZUV6GJt040pZFttXH8mCAoJwHD0Gc7HimyOeJCzwYE12RCpC/pqCu1Zx+LNQ7rYXJZchgIR4EZFevHAlsHBVUvnO5AWFVskWQD2FccyS45Es30CHCqo3A05SJaZpfn3QCQdaLIFedRNM+AjjDbPh9LQlAAX+G15aszIJIYAC98A6h/g2OgtVC8AdTd/um4D4B2ZeDskIoN4VkAvgrKrMNJiDDwGXEfMCZzAmQ9IL5zmdeAfaZgrY0FoD5sDdiFmXrxKr1g4XEV5EGY0ZU+W/AIb4I8DLOrzWzXwjbIbZjRHcvGF9FgI7wKctMbEn+xtzGAYguQt4BtmF1ZNpIl9cAcD20L2ISZYHjoLDYAVRvkQZjhbok3g4JtkNt+ONACiLuAbUzGybedevFm0USlBfztFocBheuSCNM8YR3e8qifA15BtXFsnKQzQBR2ZOH8XIGlaCjz03AULI4BWFWGuzdMT5unY2DPwrt74q5HRqXcx33Ln5O4vOvdy4VAPLDY4gugSA7GxBKZBPxkYVjt7gechqMOlsKBNYUHXl6FlMV3OZs2ibCmUPte03WdvnU39hugzzvIJcyRFye/vLfxxkBRwtzNPZgtPgAGuopjxf0Ks68BVaawBvR246CXnAOKnHesdDmL8yXgkeOZqiwRqor0eQf4JynO2RqulSRtkdT5DjCVLpfId/viboDuoF5lH6xKF/oXrzRE+D4vYbAqXR4+tarhReUzibAsXeEFAqYb77yEwZTCAVOIcxJheD+ZUF+Ga3QXgFkiP/g1JRHCOzFp63FTeNrh8EJvJmMPC/7uIE0z8guNfgz/OsN7Tm9hD/h+SF/TILTK/PqPg7P+dd//Mv4BaRX4ddqUoCoAAAAASUVORK5CYII="},
   {"id": "um_porcento", "nome": "1% Todo Dia", "sub": "Evolução diária", "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAMAAAC5zwKfAAAAP1BMVEXs5gD18wDd3gDg3wC5uQCn4QD/tgB/fwBt8QC83QAK/wB/vwD/AAD/fwAAAADj3QAAAAAAAAAAAAAAAAAAAADZxhOWAAAAEHRSTlP2C2KfAxwDAgdSAQQBAgD816ot9wAAA/VJREFUeNq1WddiqzAMlTyApK35/7+91vACE8Z1/NAEgg9HW1YhnC1EdMiLPk4fhxOwaQMRb+BTQOUTP4yucucBIG+KUBZWyGsFG2HTr3cAaQNGMIHJS64tYR5BwiGcbbFaVHsI2QNMcC0vaO8w5CXA+GKCq8Dor7XyWf0QITskd4BTCCbtUoWlbWTvShEAhh//DOgKPZZLsWbEOaFmbTBJ9xlwClieNvQwOjcnhrNz9NWZ8k7cKhI2/FRcUXpweyXFCAwhi0Fiu2PACs/Q1t8PIVQ9OR0BYnzqkwH7rhARsQ+I+lahd5qECskGEXbykqKn8zQV844asNUjVP6S8S7ACcmyxW0Bo6L3P56tikRWeQYM9ia/hqMNG0A18C1+DcdsGEgCr7B3gUschclKQpPc0Ahs7+I1WzmhQaWKWrfXATHtpYA0CdCqwC7cXk6FthQ6CRANJ+T7Agsdpsj5DrMOCRIfAf6S0ByCZJriNpT5nvErKZ5khLoMP1qsLi0KNjiotdv0IK7OrtLdVJbFysalGJrCcNO/bO78FfF2XmOqSmgahhvvYhoJAm1cXoAxeGurkJpzlVyxy3BJLYj65RvfNl2jem3lsi5XGOgCYlhymZRdDECVXkIdwwvaGE2Q7MgHgFAiJ0oYL1+BYReckS59KtPZRUiV0cgHgJa6OAX0kdEKfpp8vOWTwNs+dCaSpscwhB9cAoEooCMRId4iQAy/RHDfgQRpx/CgP8TJQBGZAP2EDMgEfS+JqGv2AOe3ZBABXIhaxGAtefpLFulFFusVPqSkxsooWmeLcIdzUGqvALJdealFUpP7EJBDgy89E3zzJVhzsYPdA4aoGy+U2CIv5dutQMDd5AmgmgDFIh7UUaO3+wOGW5ttATlbpBghP184cHoUQV0A255yFsDZ/VU5US0iSJN4URfQdPpBjZT6NRIjrEe74JuSlt9TBHmxdKxVMhSGTZoWi4hXamJ99xly5qGeWjXWHsZ+glpEspbmCnoqXu5jmmqntDUFsgeIuGjW+uP0xknYx7jsAuaDjFOG1Vp/6jSN5JQe6gS+BdROQk86hnNls+YcLDYJH4sEl5hupGAB5F7iqEBXt+fdLdcwtFARrEqeDho2B3z+6qKXt28uLTGG3EeYEJ61Sw7LTmAjS7ODzxoS7i5NquHU3uRu7Hk7l+xJgJRBcETDGRIgH/ZHtMSYQi/gmKY95UM+Dww5Vnzx4DP+aDb+8Dj8eNsewN2VA7j7fACvRw5jRgTjhxg0BmrHLPifY5bxg6BiOBlVTf1RFV4fVY0fpnF5uDPuc2MHku7CQHL8yPQLQ93xY+cvDMa/MLr/wj8XqmmBdiXThaL4D1VMC3va+eUHAAAAAElFTkSuQmCC"},
+  {"id": "flow", "nome": "Cantil Flow", "sub": "Cooperação e fluidez", "src": "data:image/png;base64,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"},
+  {"id": "competitivo", "nome": "Protocolo Cantil – Competitivo", "sub": "Desempenho e competição", "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQBAMAAAB8P++eAAAAMFBMVEUAAADo4gDz8QDj3QDk3gC3twD8tgB/fwD/fwD/AAAA/wC/fwAAAAAAAAAAAAAAAABzOyTdAAAADHRSTlMA+ApfnwMDAgIBAQT4+UoLAAAEbklEQVR42u2Wz28TRxTHPzsbYietvd4UGgJkd2xETA5NnEArboFbD21JufSK+AfKqceWW28V6p9Q9Y7EuQJaVWq5oLSlagTCHW9aZUnBO7sRimPjnR42jp2QoEgcqkrMaX5858173/c03wevx/9kiCuAqLywb+1an+qSKnLHGXrwUmCFVAFwaLI323MMvigq8qDeVhYHVvb+QBNvOvqgNg/MVd9N8VJgut9xfupSn4EpgH0il/2Tr+Hqvi8KcXZ+++TMGQZN7siMdBUOCqAinjKn6nvzKOIWtEciAMcPWQsNe0ctAGsFQARLkHrXeQk9g86oF7eFBIICiKQD5NsO8HYHqL9ADFxyXXcsS5u84LqH5UDYVs8DCdTnFL7OojaauTsSUOkg8PIvCpj7/kLz983s5si0c3thCXp89crEdV3XdWsgt/yVUHZd13XHFgd4LP+ZB2B9c+oRGA0kHz/IWBT30z5wYSSrUDN9dglRdh2N2fS39rw3dY9HcVNRHgMoAnbgAaQlwHJrrAIwlN3CvjdUABIJx93fIhACwKob7GD7ab+smfA0CPduJNzQnChqKx6LwBwLcmbC0RlQxC38zRCoPVhLh+LR2YJc9kuPDVA102FV64zH/IS2m6IAvPXUAbfhxOudirMyqUBEvhZRmgVzFFJvErAKlOaF8gJTqSjVTYBUBv16TJLRgtCAb2meqNG/PnCfzFbdcHg6hPHchCTaTuFwtwh209exnTrn5Q1H0lCHn2uw1jv9XAsu39ZglQInAk+gPLCSyCqCfeGNH+o9eoyJXA3Oe89Oq9QkxYan9EZUHV6wNCYKH/YJF7UY4K6qQ85/NFNBbXIPXKCoB8pMWEXA0sg6VEysUxAf3cx2S/V+UVxsdQwwvvAT4MRMRGCWfakBe9X0gd2m8DW076cgkhzjeQ0i2QBqq9X8dvUcqkNcA3P8KnieVQoCwJsB5iEQ2xal0zLVH3PQbkSMydzD0fEoMyiWI+y1tAd0yiHtDzc19pc3hF5Xcsrk9adhC4pHpkJzorBVFMIqIqKh5w44/J06JYyjlXQVc3c8SzOrVOajNwPveG2vBCN0TRG7oaEG3PKCAO4H2dMi2YC20aVyKFabxiTNpq807VaLYybyp0NTzWtEZtBSSoglzCSIq/a7QoIKwDuPWIGVAGyG9QY4C8tWksPf0JhVqf5pgrnYYO1xFDunQ1N9f8lCWhpLp1SMtpspsNhYaaaAtLTdTLn27VOs9Y4tYrALjsYphxyNgHOPkw0DPItzZsLRPz85F3KkNORZmvnvUg4FMTOlHX+cF+GVVEuuQKKF0NjHPOgKCJYGcZ20xq83IUhrGCkaMPONAm8SoXYK7ycKy4Z08SQUBdj1zwFKmF3q81WQlev1WzW0mJRzq9cAofHSncDuF6RdIE1XRLj9+QrR06LLc4e3ZvKklH1FkFd6v7jcDRQ90agMiofo6WUfyCm5b5cCSDfLzC6dPLDGvwpwfXboFVqxvdqZz8b/eN2j/ufjX0BBunpDuLlYAAAAAElFTkSuQmCC"},
+  {"id": "core_training", "nome": "Core Training Cantil", "sub": "Estabilidade e controle do tronco", "src": "data:image/png;base64,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"},
+  {"id": "skill_cantil", "nome": "Skill Cantil", "sub": "Técnica e controle", "src": "data:image/png;base64,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"},
 ];
 const iconeProtocolo = (id) => ICONES_PROTOCOLO.find((i) => i.id === id) || null;
 function IconeProtocolo({ id, size = 44 }) {
@@ -401,6 +405,8 @@ const APTIDOES = [
   "Aquecimento", "Cardiorrespiratória", "Resistência muscular localizada", "Resistência", "Força", "Potência",
   "Velocidade", "Agilidade", "Coordenação", "Equilíbrio", "Flexibilidade", "Precisão", "Skill", "Core",
 ];
+// Na tela de edição, só os 3 últimos exercícios de cada dia ficam à vista; os anteriores ficam numa aba que se abre ao tocar
+const LIMITE_VISIVEL = 3;
 function diasVazios() {
   return DIAS_SEMANA.map((dia) => ({ dia, exercicios: [] }));
 }
@@ -980,8 +986,24 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const [salvando, setSalvando] = useState(false);
   const [novaCategoria, setNovaCategoria] = useState(false);
   const [filtroNivel, setFiltroNivel] = useState(""); // "" = Todos
+  const [programacoes, setProgramacoes] = useState([]);
+  const [mostrarPend, setMostrarPend] = useState(false);
   const [form, setForm] = useState({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
   const { pedir, Modal } = useSenhaGate(senha);
+
+  useEffect(() => { (async () => setProgramacoes(await fetchProgramacoes()))(); }, []);
+
+  // Exercícios usados nas programações que ainda NÃO estão na biblioteca (somem da lista quando cadastrados)
+  const nomesNaBiblioteca = new Set(exercicios.map((e) => normalizarTexto(e.nome)));
+  const pendentesMapa = {};
+  programacoes.forEach((pr) => pr.dias.forEach((d) => exerciciosDoDia(d).forEach((e) => {
+    const k = normalizarTexto(e.nome);
+    if (!k || nomesNaBiblioteca.has(k)) return;
+    if (!pendentesMapa[k]) pendentesMapa[k] = { chave: k, nome: e.nome.trim(), n: 0, objetivo: "" };
+    pendentesMapa[k].n++;
+    if (e.objetivo) pendentesMapa[k].objetivo = e.objetivo;
+  })));
+  const pendentes = Object.values(pendentesMapa).sort((x, y) => y.n - x.n || x.nome.localeCompare(y.nome, "pt-BR"));
 
   const categoriasExistentes = Array.from(
     new Set([...GRUPOS_SUGERIDOS, ...exercicios.map((e) => e.grupoGrande).filter(Boolean)])
@@ -991,6 +1013,12 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
     setEditando(null);
     setNovaCategoria(false);
     setForm({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
+    setSheetAberto(true);
+  });
+  const abrirNovoComNome = (nome) => pedir(() => {
+    setEditando(null);
+    setNovaCategoria(false);
+    setForm({ nome, nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
     setSheetAberto(true);
   });
   const abrirEdicao = (ex) => pedir(() => { setEditando(ex.id); setNovaCategoria(false); setForm(ex); setSheetAberto(true); });
@@ -1037,6 +1065,36 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
           <Plus size={20} style={{ margin: "auto" }} />
         </button>
       </div>
+
+      {pendentes.length > 0 && (
+        <div style={{ background: "#1C1D20", border: "1px solid rgba(255,138,61,0.4)", borderRadius: 10, marginBottom: 12, overflow: "hidden" }}>
+          <button
+            onClick={() => setMostrarPend(!mostrarPend)}
+            style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "none", border: "none", cursor: "pointer", padding: "11px 14px", color: "#FF8A3D", fontSize: 13.5, fontWeight: 700 }}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: 9 }}><AlertCircle size={17} /> A cadastrar na biblioteca ({pendentes.length})</span>
+            {mostrarPend ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+          {mostrarPend && (
+            <div style={{ padding: "0 14px 12px", borderTop: "1px solid #2E2F34" }}>
+              <div style={{ fontSize: 11.5, color: "#71727A", margin: "10px 0 2px", lineHeight: 1.4 }}>
+                Exercícios usados nas programações que ainda não estão na biblioteca. Ao cadastrar, eles saem desta lista sozinhos.
+              </div>
+              {pendentes.map((pn) => (
+                <div key={pn.chave} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{pn.nome}</div>
+                    <div style={{ fontSize: 11, color: "#71727A" }}>usado {pn.n}×{pn.objetivo ? ` · ${pn.objetivo}` : ""}</div>
+                  </div>
+                  <GhostButton onClick={() => abrirNovoComNome(pn.nome)} style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }}>
+                    <Plus size={13} /> Cadastrar
+                  </GhostButton>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Botões de filtro por categoria mãe */}
       <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
@@ -2771,6 +2829,9 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
       : { nome: "", destaque: false, descricao: "", semanaInicio: segundaDe(), dias: diasVazios() }
   );
 
+  const [expandidos, setExpandidos] = useState({}); // dias com a aba "anteriores" aberta
+  const nomesBib = new Set(biblioteca.map((b) => normalizarTexto(b.nome)));
+
   const definirLista = (idx, lista) => {
     setForm({ ...form, dias: form.dias.map((d, i) => (i === idx ? { ...d, exercicios: lista } : d)) });
   };
@@ -2796,23 +2857,51 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
 
       {form.dias.map((d, i) => {
         const lista = exerciciosDoDia(d);
+        const aberto = !!expandidos[d.dia];
+        const ocultos = !aberto && lista.length > LIMITE_VISIVEL ? lista.length - LIMITE_VISIVEL : 0;
         return (
           <div key={d.dia} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: lista.length ? 8 : 2 }}>
               <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase" }}>{NOMES_DIA[d.dia]}</span>
               {lista.length > 0 && <span style={{ fontSize: 11, color: "#71727A" }}>{lista.length} exercício{lista.length > 1 ? "s" : ""}</span>}
             </div>
-            {lista.map((e, j) => (
+            {lista.length > LIMITE_VISIVEL && (
+              <button
+                onClick={() => setExpandidos({ ...expandidos, [d.dia]: !aberto })}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, textAlign: "left",
+                  background: "#212226", border: "1px dashed #3A3B40", borderRadius: 8, padding: "9px 10px", marginBottom: 6, cursor: "pointer",
+                }}
+              >
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#E4DE00" }}>
+                    {aberto ? "Recolher anteriores" : `${ocultos} exercício${ocultos > 1 ? "s" : ""} anterior${ocultos > 1 ? "es" : ""}`}
+                  </span>
+                  {!aberto && (
+                    <span style={{ display: "block", fontSize: 11, color: "#71727A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {lista.slice(0, ocultos).map((x) => x.nome).join(", ")}
+                    </span>
+                  )}
+                </span>
+                {aberto ? <ChevronUp size={16} color="#71727A" /> : <ChevronDown size={16} color="#71727A" />}
+              </button>
+            )}
+            {lista.map((e, j) => (j < ocultos ? null : (
               <div key={j} style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 8, padding: "8px 10px", marginBottom: 6 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{e.nome}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{e.nome}</div>
+                    {nomesBib.size > 0 && !nomesBib.has(normalizarTexto(e.nome)) && (
+                      <div style={{ fontSize: 10.5, color: "#FF8A3D", marginTop: 2 }}>fora da biblioteca · vai para a lista de cadastro</div>
+                    )}
+                  </div>
                   <X size={17} color="#71727A" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => remover(i, j)} />
                 </div>
                 <div style={{ marginTop: 6 }}>
                   <ObjetivoSelect valor={e.objetivo} onChange={(v) => alterar(i, j, "objetivo", v)} />
                 </div>
               </div>
-            ))}
+            )))}
             <AdicionarExercicio biblioteca={biblioteca} onAdd={(nome) => adicionar(i, nome)} />
           </div>
         );
