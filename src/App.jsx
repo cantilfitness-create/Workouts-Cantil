@@ -415,6 +415,15 @@ const LIMITE_VISIVEL = 3;
 const PREFIXO_QTD = /^\s*(?:[A-Za-z]\d+\s*[-–.)]\s*)?(?:\d[\d.,\-–/']*\s*(?:[xX×]\s*)?(?:(?:km|min|seg|reps?|cal|m|s)\b\s*)?)*/i;
 const limparNome = (t) => normalizarTexto(t).replace(/[^a-z0-9]+/g, " ").trim();
 
+// Programação da semana atual dentro de uma pasta (ou null)
+function acharProgramacaoDaSemana(programacoes, pasta) {
+  const segunda = segundaDe();
+  return programacoes.find((pr) => {
+    const ref = dataRefProgramacao(pr);
+    return mesmaPasta(pastaDe(pr), pasta) && ref && segundaDe(dataISOLocal(ref)) === segunda;
+  }) || null;
+}
+
 // Último objetivo usado em cada exercício nas programações (para pré-preencher)
 function construirMapaObjetivos(programacoes) {
   const mapa = {};
@@ -1433,6 +1442,135 @@ function TextoComSugestao({ value, onChange, biblioteca = [], ...resto }) {
   );
 }
 
+// Janela do botão "Treino executado": 1) escolhe a pasta da programação  2) revisa/edita os exercícios  3) lança
+function ExecutarTreinoSheet({ w, programacoes, biblioteca, salvando, onFechar, onConfirmar }) {
+  const hojeChave = DIAS_SEMANA[(new Date().getDay() || 7) - 1];
+  const [pasta, setPasta] = useState(null);
+  const [dia, setDia] = useState(hojeChave);
+  const [itens, setItens] = useState([]);
+
+  const nomesPastas = [PASTA_CT];
+  programacoes.forEach((pr) => {
+    const n = pastaDe(pr);
+    if (!nomesPastas.some((x) => mesmaPasta(x, n))) nomesPastas.push(n);
+  });
+  nomesPastas.sort((a, b) => (a === PASTA_CT ? -1 : b === PASTA_CT ? 1 : a.localeCompare(b, "pt-BR")));
+
+  const mapaGlobal = construirMapaObjetivos(programacoes);
+  const mapaDaPasta = (nome) => ({
+    ...mapaGlobal,
+    ...construirMapaObjetivos(programacoes.filter((pr) => mesmaPasta(pastaDe(pr), nome))),
+  });
+
+  const escolherPasta = (nome) => {
+    setPasta(nome);
+    setItens(extrairExerciciosDoTreino(w, biblioteca, mapaDaPasta(nome)));
+  };
+  const criarPasta = () => {
+    const nome = (window.prompt("Nome da nova pasta (ex: Treino pessoal, Academia X, João):") || "").trim();
+    if (!nome) return;
+    escolherPasta(nomesPastas.find((n) => mesmaPasta(n, nome)) || nome);
+  };
+
+  const progSemana = pasta ? acharProgramacaoDaSemana(programacoes, pasta) : null;
+  const diaProg = progSemana ? progSemana.dias.find((d) => d.dia === dia) : null;
+  const jaNoDia = new Set(diaProg ? exerciciosDoDia(diaProg).map((e) => limparNome(e.nome)) : []);
+  const jaRegistrado = !!diaProg && treinosDoDia(diaProg).some((t) => t.id === w.id);
+  const aLancar = itens.filter((it) => !jaNoDia.has(limparNome(it.nome)));
+  const mapa = pasta ? mapaDaPasta(pasta) : {};
+
+  const linhaPasta = {
+    width: "100%", display: "flex", alignItems: "center", gap: 12, textAlign: "left", cursor: "pointer",
+    background: "#1C1D20", border: "1px solid #2E2F34", borderLeft: "3px solid #E4DE00", borderRadius: 10,
+    padding: "12px 14px", marginBottom: 8,
+  };
+  const chipDia = (ativo) => ({
+    cursor: "pointer", borderRadius: 999, padding: "6px 11px", fontSize: 12, fontWeight: ativo ? 800 : 600,
+    background: ativo ? "#E4DE00" : "#1C1D20", color: ativo ? "#0A0A0A" : "#B9BABF", border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}`,
+  });
+
+  return (
+    <Sheet title="Treino executado" onClose={onFechar}>
+      <div style={{ fontSize: 13, color: "#B9BABF", marginBottom: 14, lineHeight: 1.45 }}>
+        <b style={{ color: "#F1EFE9" }}>{w.nome || "Treino"}</b>{w.codigo ? ` · #${w.codigo}` : ""}
+      </div>
+
+      {!pasta ? (
+        <>
+          <div style={{ fontSize: 12.5, color: "#71727A", marginBottom: 10 }}>Em qual pasta da programação lançar este treino?</div>
+          {nomesPastas.map((nome) => (
+            <button key={nome} onClick={() => escolherPasta(nome)} style={linhaPasta}>
+              <Folder size={20} color="#E4DE00" />
+              <span style={{ flex: 1, fontFamily: "'Anton', sans-serif", fontSize: 15, color: "#FFFFFF", letterSpacing: "0.03em", textTransform: "uppercase" }}>{nome}</span>
+              <ChevronRight size={16} color="#71727A" />
+            </button>
+          ))}
+          <button onClick={criarPasta} style={{ ...linhaPasta, borderLeft: "1px dashed #3A3B40", border: "1px dashed #3A3B40", justifyContent: "center", color: "#9A9A94", fontSize: 13.5, fontWeight: 600 }}>
+            <Plus size={16} /> Nova pasta
+          </button>
+        </>
+      ) : (
+        <>
+          <button onClick={() => setPasta(null)} style={{ background: "none", border: "none", color: "#E4DE00", fontSize: 13, fontWeight: 700, padding: 0, marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+            <ArrowLeft size={14} /> Trocar pasta
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <Folder size={18} color="#E4DE00" />
+            <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", textTransform: "uppercase" }}>{pasta}</span>
+          </div>
+
+          <div style={{ fontSize: 12, color: "#71727A", marginBottom: 6 }}>Dia da semana</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            {DIAS_SEMANA.map((d) => (
+              <button key={d} onClick={() => setDia(d)} style={chipDia(dia === d)}>{d}{d === hojeChave ? " · hoje" : ""}</button>
+            ))}
+          </div>
+
+          {jaRegistrado && (
+            <div style={{ fontSize: 12.5, color: "#FF8A3D", marginBottom: 12, lineHeight: 1.4 }}>
+              Este treino já foi lançado nesta pasta, neste dia. Para mudar, use "desfazer" no card do treino.
+            </div>
+          )}
+
+          <div style={{ fontSize: 12, color: "#71727A", marginBottom: 8 }}>
+            Exercícios reconhecidos no treino. Ajuste o objetivo, tire o que não vale ou adicione outros:
+          </div>
+          {itens.length === 0 && (
+            <div style={{ fontSize: 12.5, color: "#9A9A94", marginBottom: 8 }}>
+              Nenhum exercício da biblioteca foi reconhecido no texto. Adicione abaixo, se quiser.
+            </div>
+          )}
+          {itens.map((it, j) => (
+            <div key={`${it.nome}-${j}`} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 8, padding: "8px 10px", marginBottom: 6, opacity: jaNoDia.has(limparNome(it.nome)) ? 0.55 : 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{it.nome}</div>
+                  {jaNoDia.has(limparNome(it.nome)) && <div style={{ fontSize: 10.5, color: "#71727A", marginTop: 2 }}>já está neste dia · será ignorado</div>}
+                </div>
+                <X size={17} color="#71727A" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => setItens(itens.filter((_, k) => k !== j))} />
+              </div>
+              <div style={{ marginTop: 6 }}>
+                <ObjetivoSelect valor={it.objetivo} onChange={(v) => setItens(itens.map((x, k) => (k === j ? { ...x, objetivo: v } : x)))} />
+              </div>
+            </div>
+          ))}
+          <AdicionarExercicio
+            biblioteca={biblioteca}
+            onAdd={(nome) => setItens([...itens, { nome, objetivo: mapa[limparNome(nome)] || "" }])}
+          />
+
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <GhostButton onClick={onFechar} style={{ flex: 1 }}>Cancelar</GhostButton>
+            <PrimaryButton onClick={() => onConfirmar({ pasta, dia, itens: aLancar })} disabled={salvando || jaRegistrado} style={{ flex: 1.4 }}>
+              <Check size={16} /> {salvando ? "Lançando..." : aLancar.length > 0 ? `Lançar ${aLancar.length} exercício${aLancar.length > 1 ? "s" : ""}` : "Registrar treino"}
+            </PrimaryButton>
+          </div>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
 function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, protocolos = [], biblioteca = [] }) {
   const [form, setForm] = useState(inicial || {
     nome: "", data: new Date().toISOString().slice(0, 10), categoria: "", protocoloId: "", tags: "",
@@ -1712,7 +1850,7 @@ function SeloProtocolo({ protocolo }) {
   );
 }
 
-function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExecutarHoje, execucoes = [], expandido, onToggle, legendas, destaque, senha, protocolo }) {
+function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExecutarHoje, onDesfazerExecucao, execucoes = [], expandido, onToggle, legendas, destaque, senha, protocolo }) {
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
     <div style={{
@@ -1749,7 +1887,19 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExe
         <div style={{ padding: "0 16px 16px", borderTop: "1px solid #2E2F34" }}>
           <WorkoutDetalhes w={w} legendas={legendas} />
           {execucoes.length > 0 && (
-            <div style={{ marginTop: 14, fontSize: 12, color: "#4CAF6D", fontWeight: 700 }}>✓ Executado em {execucoes.join(", ")}</div>
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 5 }}>
+              {execucoes.map((ex, i) => (
+                <div key={i} style={{ fontSize: 12, color: "#4CAF6D", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span>✓ Executado em {ex.data} · {ex.pasta}</span>
+                  <button
+                    onClick={() => onDesfazerExecucao(w, ex)}
+                    style={{ background: "none", border: "none", color: "#9A9A94", fontSize: 11.5, textDecoration: "underline", cursor: "pointer", padding: 0 }}
+                  >
+                    desfazer
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
           <div style={{ display: "flex", gap: 10, marginTop: execucoes.length > 0 ? 10 : 18, flexWrap: "wrap" }}>
             <PrimaryButton onClick={() => onExecutarHoje(w)} style={{ flex: "1 1 100%" }}><Check size={16} /> Treino executado hoje</PrimaryButton>
@@ -2013,6 +2163,8 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const [copiaInicial, setCopiaInicial] = useState(null); // treino duplicado, ainda não salvo
   const [biblioteca, setBiblioteca] = useState([]); // para sugerir exercícios e reconhecer o treino executado
   const [programacoesExec, setProgramacoesExec] = useState([]);
+  const [execucao, setExecucao] = useState(null); // { w } enquanto a janela "Treino executado" está aberta
+  const [salvandoExec, setSalvandoExec] = useState(false);
   const [salvandoTreino, setSalvandoTreino] = useState(false);
   const [expandidoId, setExpandidoId] = useState(null);
   const [protocolos, setProtocolos] = useState([]);
@@ -2039,40 +2191,70 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     const seg = parseDataLocal(segundaDe(dataISOLocal(ref)));
     pr.dias.forEach((d) => treinosDoDia(d).forEach((t) => {
       const dt = new Date(seg.getFullYear(), seg.getMonth(), seg.getDate() + Math.max(0, DIAS_SEMANA.indexOf(d.dia)));
-      (execucoesPorTreino[t.id] = execucoesPorTreino[t.id] || []).push(formatarDiaMes(dt));
+      (execucoesPorTreino[t.id] = execucoesPorTreino[t.id] || []).push({ data: formatarDiaMes(dt), pasta: pastaDe(pr), progId: pr.id, diaChave: d.dia });
     }));
   });
 
-  // "Treino executado hoje": lança os exercícios reconhecidos do treino na programação da semana
-  // (cria a programação da semana se ainda não existir). Alimenta os gráficos da Programação.
-  const executarHoje = (w) => pedir(async () => {
+  // "Treino executado": abre a janela (escolhe a pasta, revisa os exercícios) e só então lança na programação
+  const abrirExecucao = (w) => pedir(async () => {
+    setProgramacoesExec(await fetchProgramacoes());
+    setExecucao({ w });
+  });
+  const confirmarExecucao = ({ pasta, dia, itens }) => pedir(async () => {
+    if (!execucao || salvandoExec) return;
+    const w = execucao.w;
+    setSalvandoExec(true);
     const lista = await fetchProgramacoes();
-    const segunda = segundaDe();
-    const diaChave = DIAS_SEMANA[(new Date().getDay() || 7) - 1];
-    const prog = lista.find((pr) => {
-      const ref = dataRefProgramacao(pr);
-      return mesmaPasta(pastaDe(pr), PASTA_CT) && ref && segundaDe(dataISOLocal(ref)) === segunda;
-    });
-    const base = prog || { nome: "", destaque: false, descricao: "", semanaInicio: segunda, pasta: "", dias: diasVazios() };
-    const diaAtual = base.dias.find((d) => d.dia === diaChave) || { dia: diaChave, exercicios: [] };
+    const prog = acharProgramacaoDaSemana(lista, pasta);
+    const base = prog || { nome: "", destaque: false, descricao: "", semanaInicio: segundaDe(), pasta: mesmaPasta(pasta, PASTA_CT) ? "" : pasta, dias: diasVazios() };
+    const diaAtual = base.dias.find((d) => d.dia === dia) || { dia, exercicios: [] };
     if (treinosDoDia(diaAtual).some((t) => t.id === w.id)) {
-      if (onToast) onToast("Este treino já foi registrado hoje");
+      setSalvandoExec(false);
+      if (onToast) onToast("Este treino já foi lançado nesse dia");
       return;
     }
-    const extraidos = extrairExerciciosDoTreino(w, biblioteca, construirMapaObjetivos(lista));
     const existentes = new Set(exerciciosDoDia(diaAtual).map((e) => limparNome(e.nome)));
-    const novos = extraidos.filter((e) => !existentes.has(limparNome(e.nome)));
-    const dias = base.dias.map((d) => (d.dia !== diaChave ? d : {
+    const novos = [];
+    itens.forEach((it) => {
+      const k = limparNome(it.nome);
+      if (!k || existentes.has(k)) return;
+      existentes.add(k);
+      novos.push({ nome: it.nome, objetivo: it.objetivo || "" });
+    });
+    const dias = base.dias.map((d) => (d.dia !== dia ? d : {
       ...d,
       exercicios: [...exerciciosDoDia(d), ...novos],
-      treinos: [...treinosDoDia(d), { id: w.id, codigo: w.codigo, nome: w.nome }],
+      treinos: [...treinosDoDia(d), { id: w.id, codigo: w.codigo, nome: w.nome, adicionados: novos.map((n) => n.nome) }],
     }));
     const salvo = prog ? await atualizarProgramacaoDb(prog.id, { ...prog, dias }) : await inserirProgramacaoDb({ ...base, dias });
+    setSalvandoExec(false);
     if (!salvo) { if (onToast) onToast("Não foi possível registrar o treino"); return; }
+    setExecucao(null);
     setProgramacoesExec(await fetchProgramacoes());
-    if (onToast) onToast(novos.length > 0
-      ? `Registrado! ${novos.length} exercício${novos.length > 1 ? "s" : ""} lançado${novos.length > 1 ? "s" : ""} na programação (${NOMES_DIA[diaChave]}).`
-      : "Registrado! Nenhum exercício novo da biblioteca foi reconhecido no texto do treino.");
+    if (onToast) {
+      if (!mesmaPasta(pasta, PASTA_CT) && !prog && !salvo.pasta) onToast("Lançado, mas a pasta não foi salva: rode o SQL das pastas (programacao_pastas.sql)");
+      else onToast(`Lançado em ${pasta}: ${novos.length} exercício${novos.length === 1 ? "" : "s"} (${NOMES_DIA[dia]}).`);
+    }
+  });
+  // Desfazer: tira o registro do treino e os exercícios que ele lançou naquele dia
+  const desfazerExecucao = (w, ex) => pedir(async () => {
+    if (!window.confirm(`Desfazer o registro deste treino em ${ex.data} (${ex.pasta})? Os exercícios que ele lançou nesse dia serão removidos.`)) return;
+    const lista = await fetchProgramacoes();
+    const prog = lista.find((pr) => pr.id === ex.progId);
+    if (!prog) { setProgramacoesExec(lista); return; }
+    const dias = prog.dias.map((d) => {
+      if (d.dia !== ex.diaChave) return d;
+      const reg = treinosDoDia(d).find((t) => t.id === w.id);
+      const remover = new Set(((reg && reg.adicionados) || []).map(limparNome));
+      return {
+        ...d,
+        exercicios: exerciciosDoDia(d).filter((e) => !remover.has(limparNome(e.nome))),
+        treinos: treinosDoDia(d).filter((t) => t.id !== w.id),
+      };
+    });
+    const ok = await atualizarProgramacaoDb(prog.id, { ...prog, dias });
+    setProgramacoesExec(await fetchProgramacoes());
+    if (onToast) onToast(ok ? "Registro desfeito" : "Não foi possível desfazer");
   });
 
   // O treino em destaque fica sempre no topo da lista, mesmo que seja antigo,
@@ -2280,7 +2462,8 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               onToggle={() => setExpandidoId(expandidoId === w.id ? null : w.id)}
               onEditar={abrirEdicaoTreino}
               onDuplicar={duplicarTreino}
-              onExecutarHoje={executarHoje}
+              onExecutarHoje={abrirExecucao}
+              onDesfazerExecucao={desfazerExecucao}
               execucoes={execucoesPorTreino[w.id] || []}
               onExcluir={excluir} onCompartilhar={compartilhar} legendas={legendas}
               destaque={w.id === bannerWorkoutId}
@@ -2299,6 +2482,17 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
             </GhostButton>
           )}
         </>
+      )}
+
+      {execucao && (
+        <ExecutarTreinoSheet
+          w={execucao.w}
+          programacoes={programacoesExec}
+          biblioteca={biblioteca}
+          salvando={salvandoExec}
+          onFechar={() => setExecucao(null)}
+          onConfirmar={confirmarExecucao}
+        />
       )}
 
       {Modal}
