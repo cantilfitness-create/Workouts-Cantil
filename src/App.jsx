@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
-  ClipboardList, AlertCircle, BarChart3, Copy, Folder
+  ClipboardList, AlertCircle, BarChart3, Copy, Folder, SlidersHorizontal
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -215,6 +215,7 @@ const workoutFromDb = (r) => ({
   tags: r.tags || "", warmupGeral: r.warmup_geral || "", warmupEspecifico: r.warmup_especifico || "",
   skill: r.skill || "", blocos: r.blocos && r.blocos.length ? r.blocos : [blocoVazio()],
   protocoloId: r.protocolo_id || "",
+  favorito: !!r.favorito,
   criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
 });
 const workoutToDb = (w) => ({
@@ -312,8 +313,20 @@ async function searchWorkoutsDb(termo) {
   if (error) { console.error(error); return []; }
   return data.map(workoutFromDb);
 }
-// Todos os treinos que têm resultado registrado em algum bloco (filtra no aparelho)
-async function fetchWorkoutsComResultado() {
+// Favoritar não passa pelo formulário do treino (coluna "favorito": ver workouts_favorito.sql)
+async function definirFavoritoDb(id, valor) {
+  const { error } = await supabase.from("workouts").update({ favorito: valor }).eq("id", id);
+  if (error) console.error(error);
+  return !error;
+}
+// Renomeia (ou, com novo = "", remove) uma categoria "grupo grande" em todos os exercícios dela
+async function renomearCategoriaDb(antigo, novo) {
+  const { error } = await supabase.from("exercicios").update({ grupo_grande: novo }).eq("grupo_grande", antigo);
+  if (error) console.error(error);
+  return !error;
+}
+// Todos os treinos (em lotes), usados pelos filtros
+async function fetchTodosWorkouts() {
   const todos = [];
   const TAM = 500;
   for (let off = 0; ; off += TAM) {
@@ -327,7 +340,11 @@ async function fetchWorkoutsComResultado() {
     todos.push(...data);
     if (data.length < TAM) break;
   }
-  return todos.map(workoutFromDb).filter((w) => (w.blocos || []).some((b) => (b.resultado || "").trim()));
+  return todos.map(workoutFromDb);
+}
+// Todos os treinos que têm resultado registrado em algum bloco (filtra no aparelho)
+async function fetchWorkoutsComResultado() {
+  return (await fetchTodosWorkouts()).filter((w) => (w.blocos || []).some((b) => (b.resultado || "").trim()));
 }
 async function fetchWorkoutById(id) {
   const { data, error } = await supabase.from("workouts").select("*").eq("id", id).maybeSingle();
@@ -706,6 +723,18 @@ function formatarDataHoraCompleta(iso) {
 
 /* ---------------------------- UI primitives ---------------------------- */
 
+// Nível discreto: só um pontinho com a cor (o nome aparece ao segurar/passar o dedo)
+function PontoNivel({ nome, cor, size = 9 }) {
+  if (!nome) return null;
+  return (
+    <span
+      title={nome}
+      aria-label={`Nível ${nome}`}
+      style={{ display: "inline-block", width: size, height: size, borderRadius: "50%", background: cor, opacity: 0.9, flexShrink: 0, border: "1px solid rgba(255,255,255,0.18)" }}
+    />
+  );
+}
+
 function Stamp({ nome, cor, size = "md" }) {
   const s = size === "sm" ? { pad: "2px 10px", font: 11 } : { pad: "4px 14px", font: 13 };
   return (
@@ -1058,6 +1087,10 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const [filtroNivel, setFiltroNivel] = useState(""); // "" = Todos
   const [programacoes, setProgramacoes] = useState([]);
   const [mostrarPend, setMostrarPend] = useState(false);
+  const [abertoId, setAbertoId] = useState(null); // exercício com a descrição "suspensa" aberta
+  const [catAberto, setCatAberto] = useState(false); // janela de categorias
+  const [edicaoCat, setEdicaoCat] = useState({}); // nomes digitados ao renomear categorias
+  const [copiaEx, setCopiaEx] = useState(false); // formulário aberto a partir de "Duplicar"
   const [form, setForm] = useState({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
   const { pedir, Modal } = useSenhaGate(senha);
 
@@ -1075,23 +1108,54 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   })));
   const pendentes = Object.values(pendentesMapa).sort((x, y) => y.n - x.n || x.nome.localeCompare(y.nome, "pt-BR"));
 
-  const categoriasExistentes = Array.from(
-    new Set([...GRUPOS_SUGERIDOS, ...exercicios.map((e) => e.grupoGrande).filter(Boolean)])
-  ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  // Categorias em uso (com contagem). As sugeridas só aparecem enquanto a biblioteca ainda não tem nenhuma.
+  const contagemCat = {};
+  exercicios.forEach((e) => { if (e.grupoGrande) contagemCat[e.grupoGrande] = (contagemCat[e.grupoGrande] || 0) + 1; });
+  const categoriasEmUso = Object.keys(contagemCat).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const categoriasExistentes = categoriasEmUso.length > 0
+    ? categoriasEmUso
+    : [...GRUPOS_SUGERIDOS].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const variacoesDoGrupo = Array.from(new Set(
+    exercicios.filter((e) => e.grupoGrande === form.grupoGrande && e.grupoMenor).map((e) => e.grupoMenor)
+  )).slice(0, 8);
 
   const abrirNovo = () => pedir(() => {
     setEditando(null);
+    setCopiaEx(false);
     setNovaCategoria(false);
     setForm({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
     setSheetAberto(true);
   });
   const abrirNovoComNome = (nome) => pedir(() => {
     setEditando(null);
+    setCopiaEx(false);
     setNovaCategoria(false);
     setForm({ nome, nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
     setSheetAberto(true);
   });
-  const abrirEdicao = (ex) => pedir(() => { setEditando(ex.id); setNovaCategoria(false); setForm(ex); setSheetAberto(true); });
+  const abrirEdicao = (ex) => pedir(() => { setEditando(ex.id); setCopiaEx(false); setNovaCategoria(false); setForm(ex); setSheetAberto(true); });
+  // Duplicar: abre o formulário já preenchido como um exercício NOVO (só é criado quando você salvar)
+  const duplicarExercicio = (ex) => pedir(() => {
+    setEditando(null);
+    setCopiaEx(true);
+    setNovaCategoria(false);
+    setForm({ ...ex, nome: `${ex.nome} (cópia)` });
+    setSheetAberto(true);
+  });
+  const duplicarDoForm = () => {
+    setEditando(null);
+    setCopiaEx(true);
+    setForm({ ...form, nome: `${form.nome} (cópia)` });
+  };
+  const renomearCategoria = (antigo) => pedir(async () => {
+    const novo = (edicaoCat[antigo] !== undefined ? edicaoCat[antigo] : antigo).trim();
+    if (!novo || novo === antigo) return;
+    if (await renomearCategoriaDb(antigo, novo)) { setEdicaoCat({}); recarregar(); }
+  });
+  const removerCategoria = (antigo) => pedir(async () => {
+    if (!window.confirm(`Remover a categoria "${antigo}"? Os ${contagemCat[antigo]} exercícios dela ficam sem grupo.`)) return;
+    if (await renomearCategoriaDb(antigo, "")) { setEdicaoCat({}); recarregar(); }
+  });
 
   const salvar = async () => {
     if (!form.nome.trim() || salvando) return;
@@ -1184,6 +1248,12 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
             </button>
           );
         })}
+        <button
+          onClick={() => setCatAberto(true)}
+          style={{ flexShrink: 0, background: "none", border: "1px dashed #3A3B40", borderRadius: 999, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, color: "#9A9A94", cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          ✎ Categorias
+        </button>
       </div>
 
       {Object.keys(grupos).length === 0 && (
@@ -1192,44 +1262,84 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
 
       {Object.entries(grupos).map(([grupo, lista]) => (
         <Section key={grupo} title={grupo} icon={<Layers size={16} color="#E4DE00" />}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {lista.map((ex) => (
-              <div key={ex.id} style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 10, padding: "12px 14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>{ex.nome}</div>
-                    {(ex.nivel || ex.grupoMenor) && (
-                      <div style={{ marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {ex.nivel && <Badge>{ex.nivel}</Badge>}
-                        {ex.grupoMenor && <Badge>{ex.grupoMenor}</Badge>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {lista.map((ex) => {
+              const aberto = abertoId === ex.id;
+              return (
+                <div key={ex.id} style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 10, overflow: "hidden" }}>
+                  <button
+                    onClick={() => setAbertoId(aberto ? null : ex.id)}
+                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: "none", border: "none", cursor: "pointer", padding: "12px 14px", textAlign: "left" }}
+                  >
+                    <span style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>{ex.nome}</span>
+                    {aberto ? <ChevronUp size={16} color="#71727A" /> : <ChevronDown size={16} color="#71727A" />}
+                  </button>
+                  {aberto && (
+                    <div style={{ padding: "10px 14px 12px", borderTop: "1px solid #2E2F34" }}>
+                      {(ex.nivel || ex.grupoMenor) && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                          {ex.nivel && <Badge>{ex.nivel}</Badge>}
+                          {ex.grupoMenor && <Badge>{ex.grupoMenor}</Badge>}
+                        </div>
+                      )}
+                      {ex.equipamento && <div style={{ fontSize: 12, color: "#9A9A94" }}>Equip: {ex.equipamento}</div>}
+                      {ex.descricao && <div style={{ fontSize: 12.5, color: "#B9BABF", marginTop: 6, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{ex.descricao}</div>}
+                      {!ex.descricao && !ex.equipamento && !ex.grupoMenor && !ex.nivel && !ex.link && (
+                        <div style={{ fontSize: 12, color: "#5f6066" }}>Sem descrição ainda.</div>
+                      )}
+                      {ex.link && (
+                        <a
+                          href={ex.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8, color: "#E4DE00", fontSize: 12.5, fontWeight: 700, textDecoration: "none" }}
+                        >
+                          <PlayCircle size={14} /> Ver demonstração
+                        </a>
+                      )}
+                      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                        <GhostButton onClick={() => abrirEdicao(ex)} style={{ flex: 1, padding: "8px 10px", fontSize: 13 }}><Pencil size={13} /> Editar</GhostButton>
+                        <GhostButton onClick={() => duplicarExercicio(ex)} style={{ flex: 1, padding: "8px 10px", fontSize: 13 }}><Copy size={13} /> Duplicar</GhostButton>
                       </div>
-                    )}
-                    {ex.equipamento && <div style={{ fontSize: 12, color: "#9A9A94", marginTop: 6 }}>Equip: {ex.equipamento}</div>}
-                    {ex.descricao && <div style={{ fontSize: 12.5, color: "#B9BABF", marginTop: 6, lineHeight: 1.4 }}>{ex.descricao}</div>}
-                    {ex.link && (
-                      <a
-                        href={ex.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8, color: "#E4DE00", fontSize: 12, fontWeight: 700, textDecoration: "none" }}
-                      >
-                        <PlayCircle size={14} /> Ver demonstração
-                      </a>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 10, flexShrink: 0, marginLeft: 8 }}>
-                    <Pencil size={15} color="#71727A" style={{ cursor: "pointer" }} onClick={() => abrirEdicao(ex)} />
-                  </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Section>
       ))}
 
+      {catAberto && (
+        <Sheet title="Categorias" onClose={() => { setCatAberto(false); setEdicaoCat({}); }}>
+          <div style={{ fontSize: 12.5, color: "#9A9A94", marginBottom: 14, lineHeight: 1.45 }}>
+            Renomeie as categorias (grupo grande). Isso muda todos os exercícios do grupo. Se o novo nome já existir, os dois grupos se juntam.
+          </div>
+          {categoriasEmUso.length === 0 && <div style={{ fontSize: 12.5, color: "#71727A" }}>Ainda não há categorias em uso.</div>}
+          {categoriasEmUso.map((c) => {
+            const valor = edicaoCat[c] !== undefined ? edicaoCat[c] : c;
+            const mudou = valor.trim() && valor.trim() !== c;
+            return (
+              <div key={c} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                <TextInput value={valor} onChange={(e) => setEdicaoCat({ ...edicaoCat, [c]: e.target.value })} />
+                <div style={{ fontSize: 11.5, color: "#71727A", margin: "6px 0 8px" }}>{contagemCat[c]} exercício{contagemCat[c] === 1 ? "" : "s"}</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <PrimaryButton onClick={() => renomearCategoria(c)} disabled={!mudou} style={{ flex: 1, padding: "8px 10px", fontSize: 13 }}>Salvar nome</PrimaryButton>
+                  <GhostButton onClick={() => removerCategoria(c)} style={{ flex: 1, padding: "8px 10px", fontSize: 13, color: "#E6483F", borderColor: "#E6483F55" }}><Trash2 size={13} /> Remover</GhostButton>
+                </div>
+              </div>
+            );
+          })}
+        </Sheet>
+      )}
+
       {sheetAberto && (
-        <Sheet title={editando ? "Editar exercício" : "Novo exercício"} onClose={() => setSheetAberto(false)}>
+        <Sheet title={editando ? "Editar exercício" : copiaEx ? "Exercício duplicado" : "Novo exercício"} onClose={() => setSheetAberto(false)}>
+          {copiaEx && (
+            <div style={{ fontSize: 12.5, color: "#E4DE00", background: "rgba(228,222,0,0.08)", border: "1px solid rgba(228,222,0,0.3)", borderRadius: 8, padding: "8px 10px", marginBottom: 14, lineHeight: 1.4 }}>
+              Cópia pronta para editar. Ajuste o nome e o que precisar e toque em Salvar para criar o exercício novo.
+            </div>
+          )}
           <Field label="Nome do exercício">
             <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex: Snatch" />
           </Field>
@@ -1263,8 +1373,21 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
               />
             )}
           </Field>
-          <Field label="Grupo menor / variação">
-            <TextInput value={form.grupoMenor} onChange={(e) => setForm({ ...form, grupoMenor: e.target.value })} placeholder="Ex: Power Snatch" />
+          <Field label="Variação (opcional)">
+            <TextInput value={form.grupoMenor} onChange={(e) => setForm({ ...form, grupoMenor: e.target.value })} placeholder="Ex: Unilateral, Isométrico, Com kettlebell" />
+            <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 6, lineHeight: 1.4 }}>
+              Serve para separar versões do mesmo tipo de exercício dentro do grupo (ex.: grupo "Agachamento" → variação "Unilateral").
+            </div>
+            {variacoesDoGrupo.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                {variacoesDoGrupo.map((v) => (
+                  <button key={v} type="button" onClick={() => setForm({ ...form, grupoMenor: v })}
+                    style={{ cursor: "pointer", borderRadius: 999, padding: "5px 11px", fontSize: 12, fontWeight: 600, background: "#1C1D20", color: "#B9BABF", border: "1px solid #3A3B40" }}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            )}
           </Field>
           <Field label="Equipamento">
             <TextInput value={form.equipamento} onChange={(e) => setForm({ ...form, equipamento: e.target.value })} placeholder="Ex: Barra, anilhas" />
@@ -1278,6 +1401,11 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
           <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%", marginTop: 6 }}>
             <Save size={16} /> {salvando ? "Salvando..." : "Salvar exercício"}
           </PrimaryButton>
+          {editando && (
+            <GhostButton onClick={duplicarDoForm} style={{ width: "100%", marginTop: 10 }}>
+              <Copy size={15} /> Duplicar este exercício
+            </GhostButton>
+          )}
           {editando && (
             <GhostButton onClick={excluirDaEdicao} style={{ width: "100%", marginTop: 10, color: "#E6483F", borderColor: "#E6483F55" }}>
               <Trash2 size={15} /> Excluir exercício
@@ -1794,7 +1922,7 @@ function WorkoutDetalhes({ w, legendas = {} }) {
             <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 13, color: "#F1EFE9", textTransform: "uppercase" }}>
               Workout {i + 1} {b.titulo && `— ${b.titulo}`}
             </span>
-            <Stamp nome={b.nivel} cor={corDoNivel(b.nivel)} size="sm" />
+            <PontoNivel nome={b.nivel} cor={corDoNivel(b.nivel)} />
             <Badge>{b.formato}</Badge>
             {b.timeCap && <Badge><Timer size={10} style={{ display: "inline", marginRight: 3, verticalAlign: -1 }} />Time cap {b.timeCap}</Badge>}
           </div>
@@ -1850,7 +1978,7 @@ function SeloProtocolo({ protocolo }) {
   );
 }
 
-function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExecutarHoje, onDesfazerExecucao, execucoes = [], expandido, onToggle, legendas, destaque, senha, protocolo }) {
+function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExecutarHoje, onDesfazerExecucao, onFavoritar, execucoes = [], expandido, onToggle, legendas, destaque, senha, protocolo }) {
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
     <div style={{
@@ -1874,13 +2002,22 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExe
             <span>{w.data}</span>
             {w.codigo && <Badge>#{w.codigo}</Badge>}
             <SeloProtocolo protocolo={protocolo} />
+            <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+              {w.blocos.map((b) => <PontoNivel key={b.id} nome={b.nivel} cor={corDoNivel(b.nivel)} />)}
+            </span>
           </div>
           {tags.length > 0 && <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>{tags.map((t) => <Badge key={t}>{t}</Badge>)}</div>}
-          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-            {w.blocos.map((b) => <Stamp key={b.id} nome={b.nivel} cor={corDoNivel(b.nivel)} size="sm" />)}
-          </div>
         </div>
-        {expandido ? <ChevronDown size={18} color="#71727A" /> : <ChevronRight size={18} color="#71727A" />}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onFavoritar(w); }}
+            title={w.favorito ? "Tirar dos favoritos" : "Favoritar"}
+            style={{ background: "none", border: "none", padding: 4, cursor: "pointer", display: "flex" }}
+          >
+            <Star size={19} color={w.favorito ? "#E4DE00" : "#5f6066"} fill={w.favorito ? "#E4DE00" : "none"} />
+          </button>
+          {expandido ? <ChevronDown size={18} color="#71727A" /> : <ChevronRight size={18} color="#71727A" />}
+        </div>
       </div>
 
       {expandido && (
@@ -2055,7 +2192,7 @@ function BannerDestaque({ banner, setBanner, senha }) {
                     <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 12.5, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                       Workout {i + 1}{b.titulo ? ` — ${b.titulo}` : ""}
                     </span>
-                    <Stamp nome={b.nivel} cor={corDoNivel(b.nivel)} size="sm" />
+                    <PontoNivel nome={b.nivel} cor={corDoNivel(b.nivel)} />
                   </div>
                   {b.resultado ? (
                     <div style={{ marginTop: 6, background: "rgba(228,222,0,0.10)", border: "1px solid rgba(228,222,0,0.35)", borderRadius: 8, padding: "8px 10px" }}>
@@ -2169,6 +2306,15 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const [expandidoId, setExpandidoId] = useState(null);
   const [protocolos, setProtocolos] = useState([]);
   const [treinoDestaque, setTreinoDestaque] = useState(null);
+  const [soFavoritos, setSoFavoritos] = useState(false);
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
+  const [filtroProtocolo, setFiltroProtocolo] = useState(""); // "" = todos | "__sem__" | id do protocolo
+  const [filtroNivelTreino, setFiltroNivelTreino] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState(""); // "" | sem_resultado | com_resultado | nao_executado | executado
+  const [todosTreinos, setTodosTreinos] = useState([]);
+  const [todosCarregados, setTodosCarregados] = useState(false);
+  const [carregandoTodos, setCarregandoTodos] = useState(false);
+  const filtrosAtivos = !!(soFavoritos || filtroProtocolo || filtroNivelTreino || filtroStatus);
   const [modoResultados, setModoResultados] = useState(false);
   const [listaResultados, setListaResultados] = useState([]);
   const [carregandoResultados, setCarregandoResultados] = useState(false);
@@ -2271,7 +2417,31 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setListaResultados(await fetchWorkoutsComResultado());
     setCarregandoResultados(false);
   };
+  // Filtros (favoritos, protocolo, nível, situação): carregam todos os treinos uma vez e filtram no aparelho
+  const carregarTodos = async () => {
+    setCarregandoTodos(true);
+    setTodosTreinos(await fetchTodosWorkouts());
+    setTodosCarregados(true);
+    setCarregandoTodos(false);
+  };
+  useEffect(() => { if (filtrosAtivos && !todosCarregados) carregarTodos(); }, [filtrosAtivos, todosCarregados]);
+  const limparFiltros = () => { setSoFavoritos(false); setFiltroProtocolo(""); setFiltroNivelTreino(""); setFiltroStatus(""); };
+  const mudar = (fn) => { setModoResultados(false); setExpandidoId(null); fn(); };
+
+  const atualizarLocal = (id, patch) => {
+    const mapa = (lista) => lista.map((x) => (x.id === id ? { ...x, ...patch } : x));
+    setRecentes(mapa); setWorkouts(mapa); setResultadosBusca(mapa); setListaResultados(mapa); setTodosTreinos(mapa);
+    setTreinoDestaque((prev) => (prev && prev.id === id ? { ...prev, ...patch } : prev));
+  };
+  const favoritar = (w) => pedir(async () => {
+    const novo = !w.favorito;
+    const ok = await definirFavoritoDb(w.id, novo);
+    if (!ok) { if (onToast) onToast("Não foi possível favoritar: rode o SQL dos favoritos (workouts_favorito.sql)"); return; }
+    atualizarLocal(w.id, { favorito: novo });
+  });
+
   const abrirResultados = () => pedir(async () => {
+    limparFiltros();
     setModoResultados(true);
     setExpandidoId(null);
     await carregarResultados();
@@ -2343,6 +2513,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     await carregarRecentes();
     await carregarDestaque();
     if (modoResultados) await carregarResultados();
+    if (todosCarregados) await carregarTodos();
     if (modoTodos) await carregarPrimeiraPagina();
     if (busca.trim()) {
       const rows = await searchWorkoutsDb(busca.trim());
@@ -2370,6 +2541,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setRecentes((prev) => prev.filter((w) => w.id !== id));
     setResultadosBusca((prev) => prev.filter((w) => w.id !== id));
     setListaResultados((prev) => prev.filter((w) => w.id !== id));
+    setTodosTreinos((prev) => prev.filter((w) => w.id !== id));
     setTotalGeral((prev) => Math.max(0, prev - 1));
   });
 
@@ -2381,12 +2553,33 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const termoRes = busca.trim().toLowerCase();
   const resultadosFiltrados = listaResultados.filter((w) =>
     !termoRes || [w.nome, w.codigo, w.tags].filter(Boolean).join(" ").toLowerCase().includes(termoRes));
-  const listaBase = modoResultados ? resultadosFiltrados : (buscaAtiva ? resultadosBusca : (modoTodos ? workouts : recentes));
-  const listaExibida = !modoResultados && !buscaAtiva && treinoDestaque
+  // Filtros combinados (todos juntos) + busca de texto, feitos no aparelho
+  const temResultado = (w) => (w.blocos || []).some((b) => (b.resultado || "").trim());
+  const foiExecutado = (w) => (execucoesPorTreino[w.id] || []).length > 0;
+  const passaFiltros = (w) => {
+    if (soFavoritos && !w.favorito) return false;
+    if (filtroProtocolo === "__sem__" && w.protocoloId) return false;
+    if (filtroProtocolo && filtroProtocolo !== "__sem__" && w.protocoloId !== filtroProtocolo) return false;
+    if (filtroNivelTreino && !(w.blocos || []).some((b) => b.nivel === filtroNivelTreino)) return false;
+    if (filtroStatus === "sem_resultado" && temResultado(w)) return false;
+    if (filtroStatus === "com_resultado" && !temResultado(w)) return false;
+    if (filtroStatus === "nao_executado" && foiExecutado(w)) return false;
+    if (filtroStatus === "executado" && !foiExecutado(w)) return false;
+    if (termoRes) {
+      const prot = protocolos.find((pr) => pr.id === w.protocoloId);
+      const texto = [w.nome, w.codigo, w.tags, w.categoria, w.warmupGeral, w.warmupEspecifico, w.skill, prot && prot.titulo,
+        ...(w.blocos || []).flatMap((b) => [b.titulo, b.conteudo, b.objetivos])].filter(Boolean).join(" ").toLowerCase();
+      if (!texto.includes(termoRes)) return false;
+    }
+    return true;
+  };
+  const filtradosLocal = todosTreinos.filter(passaFiltros);
+  const listaBase = modoResultados ? resultadosFiltrados : (filtrosAtivos ? filtradosLocal : (buscaAtiva ? resultadosBusca : (modoTodos ? workouts : recentes)));
+  const listaExibida = !modoResultados && !filtrosAtivos && !buscaAtiva && treinoDestaque
     ? [treinoDestaque, ...listaBase.filter((x) => x.id !== treinoDestaque.id)]
     : listaBase;
-  const carregandoLista = modoResultados ? carregandoResultados : (buscaAtiva ? false : (modoTodos ? carregando : carregandoRecentes));
-  const treinoEmEdicao = [...recentes, ...workouts, ...resultadosBusca, ...(treinoDestaque ? [treinoDestaque] : [])].find((w) => w.id === editando);
+  const carregandoLista = modoResultados ? carregandoResultados : (filtrosAtivos ? (carregandoTodos || !todosCarregados) : (buscaAtiva ? false : (modoTodos ? carregando : carregandoRecentes)));
+  const treinoEmEdicao = [...recentes, ...workouts, ...resultadosBusca, ...todosTreinos, ...listaResultados, ...(treinoDestaque ? [treinoDestaque] : [])].find((w) => w.id === editando);
 
   return (
     <div>
@@ -2425,7 +2618,93 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
         />
       </div>
 
-      {!modoResultados && !buscaAtiva && modoTodos && (
+      {/* Favoritos + filtros */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button
+          onClick={() => mudar(() => setSoFavoritos(!soFavoritos))}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", borderRadius: 999, padding: "7px 13px", fontSize: 12.5, fontWeight: 700,
+            background: soFavoritos ? "#E4DE00" : "#1C1D20", color: soFavoritos ? "#0A0A0A" : "#B9BABF", border: `1px solid ${soFavoritos ? "#E4DE00" : "#3A3B40"}`,
+          }}
+        >
+          <Star size={13} fill={soFavoritos ? "#0A0A0A" : "none"} /> Favoritos
+        </button>
+        <button
+          onClick={() => setFiltrosAbertos(!filtrosAbertos)}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", borderRadius: 999, padding: "7px 13px", fontSize: 12.5, fontWeight: 700,
+            background: "#1C1D20", color: (filtroProtocolo || filtroNivelTreino || filtroStatus) ? "#E4DE00" : "#B9BABF",
+            border: `1px solid ${(filtroProtocolo || filtroNivelTreino || filtroStatus) ? "#E4DE00" : "#3A3B40"}`,
+          }}
+        >
+          <SlidersHorizontal size={13} /> Filtros
+          {[filtroProtocolo, filtroNivelTreino, filtroStatus].filter(Boolean).length > 0 && ` (${[filtroProtocolo, filtroNivelTreino, filtroStatus].filter(Boolean).length})`}
+        </button>
+        {filtrosAtivos && (
+          <button onClick={limparFiltros} style={{ background: "none", border: "none", color: "#9A9A94", fontSize: 12, textDecoration: "underline", cursor: "pointer", padding: 0 }}>
+            limpar
+          </button>
+        )}
+      </div>
+      {filtrosAbertos && (
+        <div style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 11.5, color: "#71727A", marginBottom: 6, fontWeight: 600 }}>PROTOCOLO</div>
+          <Select value={filtroProtocolo} onChange={(e) => mudar(() => setFiltroProtocolo(e.target.value))}>
+            <option value="">Todos os protocolos</option>
+            {protocolos.map((pr) => <option key={pr.id} value={pr.id}>{pr.titulo || "Protocolo sem título"}</option>)}
+            <option value="__sem__">Sem protocolo</option>
+          </Select>
+
+          <div style={{ fontSize: 11.5, color: "#71727A", margin: "12px 0 6px", fontWeight: 600 }}>NÍVEL</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {NIVEIS.map((n) => {
+              const ativo = filtroNivelTreino === n.nome;
+              return (
+                <button
+                  key={n.nome}
+                  onClick={() => mudar(() => setFiltroNivelTreino(ativo ? "" : n.nome))}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", borderRadius: 999, padding: "6px 11px", fontSize: 12, fontWeight: ativo ? 800 : 600,
+                    background: ativo ? "#26272B" : "#1C1D20", color: ativo ? "#FFFFFF" : "#B9BABF", border: `1px solid ${ativo ? n.cor : "#3A3B40"}`,
+                  }}
+                >
+                  <PontoNivel nome={n.nome} cor={n.cor} size={10} /> {n.nome}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ fontSize: 11.5, color: "#71727A", margin: "12px 0 6px", fontWeight: 600 }}>SITUAÇÃO</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[["sem_resultado", "Sem resultado"], ["com_resultado", "Com resultado"], ["nao_executado", "Não executados"], ["executado", "Executados"]].map(([id, rotulo]) => {
+              const ativo = filtroStatus === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => mudar(() => setFiltroStatus(ativo ? "" : id))}
+                  style={{
+                    cursor: "pointer", borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: ativo ? 800 : 600,
+                    background: ativo ? "#E4DE00" : "#1C1D20", color: ativo ? "#0A0A0A" : "#B9BABF", border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}`,
+                  }}
+                >
+                  {rotulo}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: "#5f6066", marginTop: 10, lineHeight: 1.4 }}>
+            "Executados" considera os treinos marcados com o botão "Treino executado".
+          </div>
+        </div>
+      )}
+
+      {filtrosAtivos && !modoResultados && !carregandoLista && (
+        <div style={{ fontSize: 11.5, color: "#E4DE00", marginBottom: 12, fontWeight: 600 }}>
+          {filtradosLocal.length} treino{filtradosLocal.length === 1 ? "" : "s"} encontrado{filtradosLocal.length === 1 ? "" : "s"}
+        </div>
+      )}
+
+      {!modoResultados && !filtrosAtivos && !buscaAtiva && modoTodos && (
         <GhostButton onClick={voltarRecentes} style={{ marginBottom: 14 }}>
           <ArrowLeft size={14} /> Voltar aos recentes
         </GhostButton>
@@ -2437,13 +2716,13 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
         </div>
       )}
 
-      {!modoResultados && !buscaAtiva && !modoTodos && (
+      {!modoResultados && !filtrosAtivos && !buscaAtiva && !modoTodos && (
         <div style={{ fontSize: 11.5, color: "#5f6066", marginBottom: 12 }}>
           Mostrando os {Math.min(6, totalGeral)} treinos mais recentes
         </div>
       )}
 
-      {!modoResultados && buscaAtiva && (
+      {!modoResultados && !filtrosAtivos && buscaAtiva && (
         <div style={{ fontSize: 11.5, color: "#5f6066", marginBottom: 12 }}>
           {buscando ? "Buscando..." : `${resultadosBusca.length} resultado(s) para "${busca.trim()}"`}
         </div>
@@ -2454,7 +2733,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       ) : (
         <>
           {listaExibida.length === 0 && (
-            <EmptyState text={modoResultados ? "Nenhum treino com resultado registrado." : buscaAtiva ? "Nenhum treino encontrado para essa busca." : "Nenhum treino programado ainda. Toque em 'Novo treino'."} />
+            <EmptyState text={modoResultados ? "Nenhum treino com resultado registrado." : filtrosAtivos ? "Nenhum treino com esses filtros." : buscaAtiva ? "Nenhum treino encontrado para essa busca." : "Nenhum treino programado ainda. Toque em 'Novo treino'."} />
           )}
           {listaExibida.map((w) => (
             <WorkoutCard
@@ -2463,6 +2742,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               onEditar={abrirEdicaoTreino}
               onDuplicar={duplicarTreino}
               onExecutarHoje={abrirExecucao}
+              onFavoritar={favoritar}
               onDesfazerExecucao={desfazerExecucao}
               execucoes={execucoesPorTreino[w.id] || []}
               onExcluir={excluir} onCompartilhar={compartilhar} legendas={legendas}
@@ -2471,12 +2751,12 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               protocolo={protocolos.find((pr) => pr.id === w.protocoloId) || null}
             />
           ))}
-          {!modoResultados && !buscaAtiva && modoTodos && workouts.length < total && (
+          {!modoResultados && !filtrosAtivos && !buscaAtiva && modoTodos && workouts.length < total && (
             <GhostButton onClick={carregarMais} style={{ width: "100%" }}>
               {carregandoMais ? "Carregando..." : `Carregar mais (${workouts.length}/${total})`}
             </GhostButton>
           )}
-          {!modoResultados && !buscaAtiva && !modoTodos && totalGeral > 6 && (
+          {!modoResultados && !filtrosAtivos && !buscaAtiva && !modoTodos && totalGeral > 6 && (
             <GhostButton onClick={abrirTodos} style={{ width: "100%" }}>
               <Lock size={14} /> Ver todos os treinos ({totalGeral})
             </GhostButton>
@@ -3323,11 +3603,11 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
   );
 }
 
-function ProgramacaoCard({ item, expandido, onToggle, onEditar, onExcluir, senha }) {
+function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, onExcluir, senha }) {
   const { pedir, Modal } = useSenhaGate(senha);
 
   const alternar = () => {
-    if (expandido || item.destaque) { onToggle(); return; }
+    if (expandido || item.destaque || livre) { onToggle(); return; }
     pedir(() => onToggle());
   };
 
@@ -3366,8 +3646,8 @@ function ProgramacaoCard({ item, expandido, onToggle, onEditar, onExcluir, senha
             <div style={{ fontSize: 13, color: "#D8D8D3", marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{item.descricao}</div>
           )}
           <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 6, display: "flex", alignItems: "center", gap: 5 }}>
-            {!item.destaque && <Lock size={11} />}
-            {totalEx} exercício{totalEx === 1 ? "" : "s"} · {item.destaque ? "Visível pra todos" : "Detalhes protegidos por senha"}
+            {!(item.destaque || livre) && <Lock size={11} />}
+            {totalEx} exercício{totalEx === 1 ? "" : "s"} · {(item.destaque || livre) ? "Visível pra todos" : "Detalhes protegidos por senha"}
           </div>
         </div>
         {expandido ? <ChevronDown size={18} color="#71727A" /> : <ChevronRight size={18} color="#71727A" />}
@@ -3585,6 +3865,16 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     ? daPasta.filter((p) => (p.nome || "").toLowerCase().includes(busca.trim().toLowerCase()))
     : daPasta;
 
+  // Só a semana mais recente da pasta fica aberta para todos; as demais pedem senha
+  const primeiraId = [...daPasta].sort((x, y) => (dataRefProgramacao(y) || 0) - (dataRefProgramacao(x) || 0))[0]?.id || null;
+  const [autoAbertaPasta, setAutoAbertaPasta] = useState("");
+  useEffect(() => {
+    if (pastaAberta && primeiraId && autoAbertaPasta !== pastaAberta) {
+      setExpandidoId(primeiraId);
+      setAutoAbertaPasta(pastaAberta);
+    }
+  }, [pastaAberta, primeiraId, autoAbertaPasta]);
+
   // Ao escolher um exercício, já sugere o último objetivo que você usou para ele
   const mapaObjetivos = {};
   [...programacoes]
@@ -3614,6 +3904,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
       onToggle={() => setExpandidoId(expandidoId === item.id ? null : item.id)}
       onEditar={abrirEdicao}
       onExcluir={excluir}
+      livre={item.id === primeiraId}
       senha={senha}
     />
   );
