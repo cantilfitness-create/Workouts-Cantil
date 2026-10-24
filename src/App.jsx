@@ -395,21 +395,31 @@ async function fetchProtocoloById(id) {
 }
 
 const DIAS_SEMANA = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"];
+const NOMES_DIA = { SEG: "Segunda", TER: "Terça", QUA: "Quarta", QUI: "Quinta", SEX: "Sexta", "SÁB": "Sábado", DOM: "Domingo" };
+// Objetivos / aptidões que aparecem ao lado de cada exercício (dá para digitar outro em "Outro…")
+const APTIDOES = [
+  "Aquecimento", "Cardiorrespiratória", "Resistência muscular localizada", "Resistência", "Força", "Potência",
+  "Velocidade", "Agilidade", "Coordenação", "Equilíbrio", "Flexibilidade", "Precisão", "Skill", "Core",
+];
 function diasVazios() {
-  return DIAS_SEMANA.map((dia) => ({ dia, protocoloId: "", protocoloIds: [], estrategia: "" }));
+  return DIAS_SEMANA.map((dia) => ({ dia, exercicios: [] }));
 }
-// Um dia pode ter vários protocolos (protocoloIds). Programações antigas usavam só protocoloId.
-const idsDoDia = (d) => (Array.isArray(d.protocoloIds) && d.protocoloIds.length ? d.protocoloIds : d.protocoloId ? [d.protocoloId] : []);
-const diaTemConteudo = (d) => idsDoDia(d).length > 0 || !!(d.estrategia || "").trim();
+const exerciciosDoDia = (d) => (Array.isArray(d.exercicios) ? d.exercicios : []);
+const diaTemConteudo = (d) => exerciciosDoDia(d).length > 0;
+// Junta textos iguais ignorando maiúsculas e acentos (para contar nos gráficos)
+const normalizarTexto = (t) => String(t || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const programacaoFromDb = (r) => ({
   id: r.id, nome: r.nome || "", destaque: !!r.destaque, descricao: r.descricao || "",
   semanaInicio: r.semana_inicio || "",
   dias: Array.isArray(r.dias) && r.dias.length === DIAS_SEMANA.length ? r.dias : diasVazios(),
   criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
 });
-const programacaoToDb = (p) => ({ nome: p.nome, destaque: !!p.destaque, descricao: p.descricao || "",
+const programacaoToDb = (p) => ({ nome: p.nome || "", destaque: !!p.destaque, descricao: p.descricao || "",
   semana_inicio: p.semanaInicio || null,
-  dias: p.dias.map((d) => { const ids = idsDoDia(d); return { ...d, protocoloIds: ids, protocoloId: ids[0] || "" }; }),
+  dias: p.dias.map((d) => ({
+    dia: d.dia,
+    exercicios: exerciciosDoDia(d).map((e) => ({ nome: e.nome, objetivo: e.objetivo || "" })),
+  })),
 });
 
 async function fetchProgramacoes() {
@@ -2687,26 +2697,89 @@ function ProtocolosTab({ senha, onToast }) {
    PROGRAMAÇÃO SEMANAL
 ================================================================= */
 
-function ProgramacaoForm({ inicial, protocolos, onSalvar, onCancelar, salvando }) {
+// Seletor do objetivo/aptidão ao lado do exercício
+function ObjetivoSelect({ valor, onChange }) {
+  const lista = valor && !APTIDOES.includes(valor) ? [...APTIDOES, valor] : APTIDOES;
+  return (
+    <Select
+      value={valor || ""}
+      onChange={(e) => {
+        if (e.target.value === "__outro__") {
+          const txt = window.prompt("Digite o objetivo / aptidão:");
+          if (txt && txt.trim()) onChange(txt.trim());
+          return;
+        }
+        onChange(e.target.value);
+      }}
+    >
+      <option value="">Objetivo...</option>
+      {lista.map((o) => <option key={o} value={o}>{o}</option>)}
+      <option value="__outro__">✎ Outro…</option>
+    </Select>
+  );
+}
+
+// Campo "digite e escolha": busca na biblioteca de exercícios, ou usa o texto digitado
+function AdicionarExercicio({ biblioteca, onAdd }) {
+  const [texto, setTexto] = useState("");
+  const termo = texto.trim().toLowerCase();
+  const sugestoes = termo ? biblioteca.filter((e) => (e.nome || "").toLowerCase().includes(termo)).slice(0, 6) : [];
+  const exato = biblioteca.some((e) => (e.nome || "").trim().toLowerCase() === termo);
+  const adicionar = (nome) => {
+    const n = (nome || "").trim();
+    if (!n) return;
+    onAdd(n);
+    setTexto("");
+  };
+  const linha = {
+    display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+    background: "none", border: "none", borderBottom: "1px solid #2E2F34", padding: "10px 12px", cursor: "pointer",
+    fontSize: 13.5, color: "#F1EFE9",
+  };
+  return (
+    <div style={{ marginTop: 6 }}>
+      <TextInput
+        value={texto}
+        onChange={(e) => setTexto(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); adicionar(sugestoes[0] ? sugestoes[0].nome : texto); } }}
+        placeholder="+ Adicionar exercício (digite para buscar)"
+        enterKeyHint="done"
+      />
+      {termo && (
+        <div style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 8, marginTop: 6, overflow: "hidden" }}>
+          {sugestoes.map((e) => (
+            <button key={e.id} onClick={() => adicionar(e.nome)} style={linha}>
+              <span style={{ fontWeight: 700 }}>{e.nome}</span>
+              {e.grupoGrande && <span style={{ fontSize: 11, color: "#71727A" }}>{e.grupoGrande}</span>}
+            </button>
+          ))}
+          {!exato && (
+            <button onClick={() => adicionar(texto)} style={{ ...linha, color: "#E4DE00", fontWeight: 700, borderBottom: "none" }}>
+              + Usar "{texto.trim()}"
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCancelar, salvando }) {
   const [form, setForm] = useState(
     inicial
       ? { ...inicial, semanaInicio: inicial.semanaInicio || segundaDe(inicial.criadoEm) }
       : { nome: "", destaque: false, descricao: "", semanaInicio: segundaDe(), dias: diasVazios() }
   );
 
-  const atualizarDia = (idx, campo, valor) => {
-    setForm({ ...form, dias: form.dias.map((d, i) => (i === idx ? { ...d, [campo]: valor } : d)) });
+  const definirLista = (idx, lista) => {
+    setForm({ ...form, dias: form.dias.map((d, i) => (i === idx ? { ...d, exercicios: lista } : d)) });
   };
-  const definirProtocolos = (idx, ids) => {
-    setForm({ ...form, dias: form.dias.map((d, i) => (i === idx ? { ...d, protocoloIds: ids, protocoloId: ids[0] || "" } : d)) });
-  };
+  const adicionar = (idx, nome) => definirLista(idx, [...exerciciosDoDia(form.dias[idx]), { nome, objetivo: objetivoSugerido(nome) }]);
+  const alterar = (idx, j, campo, valor) => definirLista(idx, exerciciosDoDia(form.dias[idx]).map((e, k) => (k === j ? { ...e, [campo]: valor } : e)));
+  const remover = (idx, j) => definirLista(idx, exerciciosDoDia(form.dias[idx]).filter((_, k) => k !== j));
 
   return (
     <div>
-      <Field label="Nome da programação">
-        <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder='Ex: "CT - Fernando"' />
-      </Field>
-
       <Field label="Semana de (segunda-feira)">
         <TextInput type="date" value={form.semanaInicio || ""} onChange={(e) => setForm({ ...form, semanaInicio: e.target.value })} />
         {(() => {
@@ -2717,12 +2790,40 @@ function ProgramacaoForm({ inicial, protocolos, onSalvar, onCancelar, salvando }
         })()}
       </Field>
 
-      <Field label="Descrição da programação (visível para todos)">
+      <Field label="Nome (opcional)">
+        <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder='Ex: "CT - Fernando"' />
+      </Field>
+
+      {form.dias.map((d, i) => {
+        const lista = exerciciosDoDia(d);
+        return (
+          <div key={d.dia} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: lista.length ? 8 : 2 }}>
+              <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase" }}>{NOMES_DIA[d.dia]}</span>
+              {lista.length > 0 && <span style={{ fontSize: 11, color: "#71727A" }}>{lista.length} exercício{lista.length > 1 ? "s" : ""}</span>}
+            </div>
+            {lista.map((e, j) => (
+              <div key={j} style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 8, padding: "8px 10px", marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{e.nome}</span>
+                  <X size={17} color="#71727A" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => remover(i, j)} />
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <ObjetivoSelect valor={e.objetivo} onChange={(v) => alterar(i, j, "objetivo", v)} />
+                </div>
+              </div>
+            ))}
+            <AdicionarExercicio biblioteca={biblioteca} onAdd={(nome) => adicionar(i, nome)} />
+          </div>
+        );
+      })}
+
+      <Field label="Observações da semana (opcional, visível para todos)">
         <AutoTextArea
           value={form.descricao || ""}
           onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-          placeholder="Explique o foco da semana, orientações gerais, observações..."
-          style={{ minHeight: 110 }}
+          placeholder="Foco da semana, orientações gerais..."
+          style={{ minHeight: 70 }}
         />
       </Field>
 
@@ -2736,40 +2837,6 @@ function ProgramacaoForm({ inicial, protocolos, onSalvar, onCancelar, salvando }
         <span style={{ fontSize: 13, color: "#B9BABF" }}>Destaque (fica visível pra todos, sem pedir senha pra ver os detalhes)</span>
       </label>
 
-      {form.dias.map((d, i) => (
-        <div key={d.dia} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 12 }}>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 13, color: "#E4DE00", marginBottom: 10, letterSpacing: "0.06em" }}>
-            {d.dia}
-          </div>
-          <Field label="Protocolos do dia (pode escolher mais de um)">
-            {idsDoDia(d).map((pid) => {
-              const pr = protocolos.find((p) => p.id === pid);
-              return (
-                <div key={pid} style={{ display: "flex", alignItems: "center", gap: 8, background: "#212226", border: "1px solid #2E2F34", borderRadius: 8, padding: "6px 10px", marginBottom: 6 }}>
-                  {pr && pr.icone && <IconeProtocolo id={pr.icone} size={22} />}
-                  <span style={{ flex: 1, fontSize: 13, color: "#F1EFE9", fontWeight: 600 }}>{pr ? (pr.titulo || "Protocolo sem título") : "Protocolo removido"}</span>
-                  <X size={16} color="#71727A" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => definirProtocolos(i, idsDoDia(d).filter((x) => x !== pid))} />
-                </div>
-              );
-            })}
-            <Select value="" onChange={(e) => { if (e.target.value) definirProtocolos(i, [...idsDoDia(d), e.target.value]); }}>
-              <option value="">{idsDoDia(d).length ? "+ Adicionar outro protocolo..." : "Selecione um protocolo..."}</option>
-              {protocolos.filter((p) => !idsDoDia(d).includes(p.id)).map((p) => (
-                <option key={p.id} value={p.id}>{p.titulo || "Protocolo sem título"}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Estratégia">
-            <AutoTextArea
-              value={d.estrategia}
-              onChange={(e) => atualizarDia(i, "estrategia", e.target.value)}
-              placeholder="Observações, foco do dia, ajustes de carga..."
-              style={{ minHeight: 70 }}
-            />
-          </Field>
-        </div>
-      ))}
-
       <div style={{ display: "flex", gap: 10 }}>
         <GhostButton onClick={onCancelar} style={{ flex: 1 }}>Cancelar</GhostButton>
         <PrimaryButton onClick={() => onSalvar(form)} disabled={salvando} style={{ flex: 1 }}>
@@ -2780,8 +2847,7 @@ function ProgramacaoForm({ inicial, protocolos, onSalvar, onCancelar, salvando }
   );
 }
 
-function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onExcluir, onValidar, senha }) {
-  const abrirProtocolo = useContext(ProtocoloViewerContext);
+function ProgramacaoCard({ item, expandido, onToggle, onEditar, onExcluir, senha }) {
   const { pedir, Modal } = useSenhaGate(senha);
 
   const alternar = () => {
@@ -2789,16 +2855,11 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
     pedir(() => onToggle());
   };
 
-  const nomeProtocolo = (id) => (protocolos.find((p) => p.id === id) || {}).titulo || "";
-
-  // Resumo da validação da semana
-  const resumo = { sim: 0, nao: 0, total: 0 };
-  item.dias.forEach((d) => idsDoDia(d).forEach((pid) => {
-    resumo.total++;
-    const v = (d.validacao || {})[pid];
-    if (v === "sim") resumo.sim++;
-    else if (v === "nao") resumo.nao++;
-  }));
+  const ref = dataRefProgramacao(item);
+  const w = ref ? semanaDoAno(ref) : null;
+  const fim = ref ? new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() + 6) : null;
+  const totalEx = item.dias.reduce((n, d) => n + exerciciosDoDia(d).length, 0);
+  const diasComConteudo = item.dias.filter(diaTemConteudo);
 
   return (
     <div style={{
@@ -2817,32 +2878,20 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
       )}
       <div style={{ padding: "14px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={alternar}>
         <div>
-          {(() => {
-            const ref = dataRefProgramacao(item);
-            if (!ref) return null;
-            const w = semanaDoAno(ref);
-            const fim = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() + 6);
-            return (
-              <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", marginBottom: 3 }}>
-                SEMANA {w.semana}/{w.total} · {formatarDiaMes(ref)} a {formatarDiaMes(fim)}
-              </div>
-            );
-          })()}
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: item.destaque ? "#FFFFFF" : "#D8D8D3", letterSpacing: "0.03em", textTransform: "uppercase" }}>
-            {item.nome || "Programação sem nome"}
-          </div>
-          {item.descricao && (
-            <div style={{ fontSize: 13, color: "#D8D8D3", marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.5, textTransform: "none" }}>{item.descricao}</div>
-          )}
-          {resumo.sim + resumo.nao > 0 && (
-            <div style={{ fontSize: 11.5, marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap", fontWeight: 700 }}>
-              <span style={{ color: "#4CAF6D" }}>✓ {resumo.sim} aconteceram</span>
-              {resumo.nao > 0 && <span style={{ color: "#E6483F" }}>✗ {resumo.nao} não</span>}
-              {resumo.total - resumo.sim - resumo.nao > 0 && <span style={{ color: "#71727A" }}>{resumo.total - resumo.sim - resumo.nao} a validar</span>}
+          {w && (
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", marginBottom: 3 }}>
+              SEMANA {w.semana}/{w.total} · {formatarDiaMes(ref)} a {formatarDiaMes(fim)}
             </div>
           )}
-          <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 4, display: "flex", alignItems: "center", gap: 5 }}>
-            {!item.destaque && <Lock size={11} />} {item.destaque ? "Visível pra todos" : "Detalhes protegidos por senha"}
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: item.destaque ? "#FFFFFF" : "#D8D8D3", letterSpacing: "0.03em", textTransform: "uppercase" }}>
+            {item.nome || (w ? `Semana ${w.semana}` : "Programação")}
+          </div>
+          {item.descricao && (
+            <div style={{ fontSize: 13, color: "#D8D8D3", marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{item.descricao}</div>
+          )}
+          <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 6, display: "flex", alignItems: "center", gap: 5 }}>
+            {!item.destaque && <Lock size={11} />}
+            {totalEx} exercício{totalEx === 1 ? "" : "s"} · {item.destaque ? "Visível pra todos" : "Detalhes protegidos por senha"}
           </div>
         </div>
         {expandido ? <ChevronDown size={18} color="#71727A" /> : <ChevronRight size={18} color="#71727A" />}
@@ -2850,40 +2899,20 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
 
       {expandido && (
         <div style={{ padding: "0 16px 16px", borderTop: "1px solid #2E2F34" }}>
-          {resumo.total > 0 && (
-            <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 12, lineHeight: 1.4 }}>
-              Ao fim da semana, marque cada protocolo: <span style={{ color: "#4CAF6D", fontWeight: 700 }}>✓ aconteceu</span> ou <span style={{ color: "#E6483F", fontWeight: 700 }}>✗ não aconteceu</span> (pede senha).
-            </div>
+          {diasComConteudo.length === 0 && (
+            <div style={{ fontSize: 12.5, color: "#71727A", marginTop: 14 }}>Nenhum exercício definido nesta programação.</div>
           )}
-          {item.dias.filter(diaTemConteudo).length === 0 && (
-            <div style={{ fontSize: 12.5, color: "#71727A", marginTop: 14 }}>Nenhum dia definido nesta programação.</div>
-          )}
-          {item.dias.filter(diaTemConteudo).map((d) => (
+          {diasComConteudo.map((d) => (
             <div key={d.dia} style={{ marginTop: 14 }}>
-              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 12.5, color: "#E4DE00", letterSpacing: "0.06em" }}>
-                {d.dia}
+              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 12.5, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                {NOMES_DIA[d.dia]}
               </div>
-              {idsDoDia(d).map((pid) => {
-                const pr = protocolos.find((p) => p.id === pid);
-                if (!pr) return null;
-                const status = (d.validacao || {})[pid];
-                return (
-                  <div key={pid} style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6 }}>
-                    <button
-                      onClick={() => abrirProtocolo && abrirProtocolo(pr)}
-                      style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 7, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
-                    >
-                      {pr.icone && <IconeProtocolo id={pr.icone} size={22} />}
-                      <span style={{ fontSize: 13, color: "#F1EFE9", fontWeight: 700, textDecoration: "underline", textDecorationColor: "#E4DE0066", textUnderlineOffset: 3 }}>{pr.titulo || "Protocolo sem título"}</span>
-                    </button>
-                    <button onClick={() => onValidar(item, d.dia, pid, "sim")} title="Aconteceu" style={botaoValidar(status === "sim", "#4CAF6D")}><Check size={16} /></button>
-                    <button onClick={() => onValidar(item, d.dia, pid, "nao")} title="Não aconteceu" style={botaoValidar(status === "nao", "#E6483F")}><X size={16} /></button>
-                  </div>
-                );
-              })}
-              {d.estrategia && (
-                <div style={{ fontSize: 12.5, color: "#B9BABF", marginTop: 3, whiteSpace: "pre-wrap" }}>{d.estrategia}</div>
-              )}
+              {exerciciosDoDia(d).map((e, j) => (
+                <div key={j} style={{ marginTop: 5, fontSize: 13.5, lineHeight: 1.4 }}>
+                  <span style={{ color: "#F1EFE9", fontWeight: 700 }}>{e.nome}</span>
+                  {e.objetivo && <span style={{ color: "#E4DE00", fontWeight: 600, fontSize: 12.5 }}> — {e.objetivo}</span>}
+                </div>
+              ))}
             </div>
           ))}
           <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
@@ -2897,104 +2926,102 @@ function ProgramacaoCard({ item, protocolos, expandido, onToggle, onEditar, onEx
   );
 }
 
-// Gráfico: protocolos que realmente aconteceram, mês a mês
-function GraficoProtocolosMes({ programacoes, protocolos }) {
-  const abrirProtocolo = useContext(ProtocoloViewerContext);
+// Ranking com filtro de mês: "Todos" junta tudo; ou escolha um mês
+function GraficoRanking({ titulo, ajuda, eventos }) {
   const [mesSel, setMesSel] = useState("");
+  const [verTodos, setVerTodos] = useState(false);
 
-  // dados[mes][protocoloId] = { sim, nao }
-  const dados = {};
-  programacoes.forEach((p) => {
-    const ref = dataRefProgramacao(p);
-    if (!ref) return;
-    const mes = `${ref.getFullYear()}-${pad2(ref.getMonth() + 1)}`;
-    p.dias.forEach((d) => idsDoDia(d).forEach((pid) => {
-      const v = (d.validacao || {})[pid];
-      if (v !== "sim" && v !== "nao") return;
-      if (!dados[mes]) dados[mes] = {};
-      if (!dados[mes][pid]) dados[mes][pid] = { sim: 0, nao: 0 };
-      dados[mes][pid][v]++;
-    }));
+  const meses = [...new Set(eventos.map((e) => e.mes))].sort().slice(-12);
+  const mesAtual = meses.includes(mesSel) ? mesSel : "";
+  const base = mesAtual ? eventos.filter((e) => e.mes === mesAtual) : eventos;
+  const grupos = {};
+  base.forEach((e) => {
+    const k = normalizarTexto(e.rotulo);
+    if (!k) return;
+    if (!grupos[k]) grupos[k] = { rotulo: e.rotulo, n: 0 };
+    grupos[k].n++;
   });
-  const meses = Object.keys(dados).sort().slice(-12);
-  const atual = meses.includes(mesSel) ? mesSel : meses[meses.length - 1];
-  const totalMes = (m) => Object.values(dados[m]).reduce((soma, c) => soma + c.sim, 0);
-  const maxTotal = Math.max(1, ...meses.map(totalMes));
-  const linhas = atual
-    ? Object.entries(dados[atual]).map(([pid, c]) => ({ pid, ...c })).sort((a, b) => b.sim - a.sim || b.nao - a.nao)
-    : [];
-  const maxSim = Math.max(1, ...linhas.map((l) => l.sim));
+  const linhas = Object.values(grupos).sort((a, b) => b.n - a.n || a.rotulo.localeCompare(b.rotulo));
+  const max = Math.max(1, ...linhas.map((l) => l.n));
+  const visiveis = verTodos ? linhas : linhas.slice(0, 10);
+  const rotuloMes = (m) => `${MESES_ABREV[Number(m.slice(5)) - 1]}/${m.slice(2, 4)}`;
+
+  const chip = (ativo) => ({
+    flexShrink: 0, cursor: "pointer", whiteSpace: "nowrap", borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: ativo ? 800 : 600,
+    background: ativo ? "#E4DE00" : "#1C1D20", color: ativo ? "#0A0A0A" : "#B9BABF", border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}`,
+  });
 
   return (
-    <div style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 12, padding: "14px 16px", marginTop: 22 }}>
+    <div style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 12, padding: "14px 16px", marginTop: 18 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <BarChart3 size={18} color="#E4DE00" />
-        <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.05em" }}>PROTOCOLOS MAIS USADOS</span>
+        <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.05em" }}>{titulo}</span>
       </div>
-      <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 4, lineHeight: 1.4 }}>
-        Mês a mês. Conta só os protocolos marcados como "aconteceu" nas programações.
-      </div>
+      <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 4, lineHeight: 1.4 }}>{ajuda}</div>
 
-      {meses.length === 0 ? (
-        <div style={{ fontSize: 12.5, color: "#9A9A94", marginTop: 14 }}>
-          Ainda sem dados. Abra uma programação e marque ✓ ou ✗ em cada protocolo ao fim da semana.
-        </div>
+      {eventos.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: "#9A9A94", marginTop: 14 }}>Ainda sem dados. Monte uma programação para começar.</div>
       ) : (
         <>
-          <div style={{ display: "flex", gap: 6, alignItems: "flex-end", height: 104, overflowX: "auto", marginTop: 14 }}>
-            {meses.map((m) => {
-              const t = totalMes(m);
-              const ativo = m === atual;
-              const h = Math.max(4, Math.round((t / maxTotal) * 62));
-              return (
-                <button
-                  key={m}
-                  onClick={() => setMesSel(m)}
-                  style={{ flex: "1 0 40px", minWidth: 40, background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 3 }}
-                >
-                  <span style={{ fontSize: 11, fontWeight: 800, color: ativo ? "#E4DE00" : "#9A9A94" }}>{t}</span>
-                  <div style={{ width: "100%", maxWidth: 34, height: h, borderRadius: 4, background: ativo ? "#E4DE00" : "#4A4B14" }} />
-                  <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", color: ativo ? "#E4DE00" : "#71727A" }}>{MESES_ABREV[Number(m.slice(5)) - 1]}</span>
-                </button>
-              );
-            })}
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", marginTop: 12 }}>
+            <button onClick={() => setMesSel("")} style={chip(mesAtual === "")}>Todos</button>
+            {meses.map((m) => <button key={m} onClick={() => setMesSel(m)} style={chip(mesAtual === m)}>{rotuloMes(m)}</button>)}
           </div>
-
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #2E2F34" }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              {MESES_NOME[Number(atual.slice(5)) - 1]} de {atual.slice(0, 4)} · {totalMes(atual)} realizados
+          {visiveis.map((l, idx) => (
+            <div key={l.rotulo} style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 18, fontSize: 11, color: "#71727A", fontWeight: 700 }}>{idx + 1}º</span>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#F1EFE9", fontWeight: 700 }}>{l.rotulo}</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "#E4DE00" }}>{l.n}×</span>
+              </div>
+              <div style={{ height: 7, background: "#26272B", borderRadius: 4, marginTop: 5, overflow: "hidden" }}>
+                <div style={{ width: `${(l.n / max) * 100}%`, height: "100%", background: "#E4DE00" }} />
+              </div>
             </div>
-            {linhas.map((l) => {
-              const pr = protocolos.find((x) => x.id === l.pid);
-              return (
-                <div key={l.pid} style={{ marginTop: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <button
-                      onClick={() => pr && abrirProtocolo && abrirProtocolo(pr)}
-                      style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 7, background: "none", border: "none", padding: 0, cursor: pr ? "pointer" : "default", textAlign: "left" }}
-                    >
-                      {pr && pr.icone && <IconeProtocolo id={pr.icone} size={20} />}
-                      <span style={{ fontSize: 13, color: "#F1EFE9", fontWeight: 700, textDecoration: pr ? "underline" : "none", textDecorationColor: "#E4DE0066", textUnderlineOffset: 3 }}>{pr ? (pr.titulo || "Protocolo sem título") : "Protocolo removido"}</span>
-                    </button>
-                    <span style={{ fontSize: 13, fontWeight: 800, color: "#E4DE00" }}>{l.sim}×</span>
-                  </div>
-                  <div style={{ height: 7, background: "#26272B", borderRadius: 4, marginTop: 5, overflow: "hidden" }}>
-                    <div style={{ width: `${(l.sim / maxSim) * 100}%`, height: "100%", background: "#E4DE00" }} />
-                  </div>
-                  {l.nao > 0 && <div style={{ fontSize: 11, color: "#E6483F", marginTop: 3 }}>{l.nao}× não aconteceu</div>}
-                </div>
-              );
-            })}
-          </div>
+          ))}
+          {linhas.length > 10 && (
+            <button onClick={() => setVerTodos(!verTodos)} style={{ marginTop: 12, background: "none", border: "none", color: "#E4DE00", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+              {verTodos ? "Ver só os 10 primeiros" : `Ver todos (${linhas.length})`}
+            </button>
+          )}
         </>
       )}
     </div>
   );
 }
 
+// Os dois gráficos: exercícios mais usados e aptidão mais trabalhada
+function GraficosProgramacao({ programacoes }) {
+  const evExercicios = [];
+  const evAptidoes = [];
+  programacoes.forEach((p) => {
+    const ref = dataRefProgramacao(p);
+    if (!ref) return;
+    const mes = `${ref.getFullYear()}-${pad2(ref.getMonth() + 1)}`;
+    p.dias.forEach((d) => exerciciosDoDia(d).forEach((e) => {
+      if ((e.nome || "").trim()) evExercicios.push({ mes, rotulo: e.nome.trim() });
+      if ((e.objetivo || "").trim()) evAptidoes.push({ mes, rotulo: e.objetivo.trim() });
+    }));
+  });
+  return (
+    <>
+      <GraficoRanking
+        titulo="EXERCÍCIOS MAIS UTILIZADOS"
+        ajuda="Quantas vezes cada exercício apareceu nas programações. Veja tudo junto ou escolha um mês."
+        eventos={evExercicios}
+      />
+      <GraficoRanking
+        titulo="APTIDÃO MAIS DESENVOLVIDA"
+        ajuda="Quantas vezes cada objetivo foi trabalhado (cardiorrespiratória, resistência, skill...)."
+        eventos={evAptidoes}
+      />
+    </>
+  );
+}
+
 function ProgramacaoSemanalTab({ senha, onToast }) {
   const [programacoes, setProgramacoes] = useState([]);
-  const [protocolos, setProtocolos] = useState([]);
+  const [biblioteca, setBiblioteca] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [busca, setBusca] = useState("");
   const [sheetAberto, setSheetAberto] = useState(false);
@@ -3007,9 +3034,9 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
 
   const carregar = useCallback(async () => {
     setCarregando(true);
-    const [progs, prots] = await Promise.all([fetchProgramacoes(), fetchProtocolos()]);
+    const [progs, exs] = await Promise.all([fetchProgramacoes(), fetchExercicios()]);
     setProgramacoes(progs);
-    setProtocolos(prots);
+    setBiblioteca(exs);
     setCarregando(false);
   }, []);
 
@@ -3021,19 +3048,6 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     await excluirProgramacaoDb(id);
     setProgramacoes((prev) => prev.filter((p) => p.id !== id));
   });
-  // Validação ao fim da semana: ✓ aconteceu / ✗ não aconteceu (toque de novo para limpar)
-  const validar = (item, diaNome, pid, valor) => pedir(async () => {
-    const dias = item.dias.map((d) => {
-      if (d.dia !== diaNome) return d;
-      const val = { ...(d.validacao || {}) };
-      if (val[pid] === valor) delete val[pid]; else val[pid] = valor;
-      return { ...d, validacao: val };
-    });
-    const ok = await atualizarProgramacaoDb(item.id, { ...item, dias });
-    if (ok) setProgramacoes((prev) => prev.map((p) => (p.id === item.id ? { ...p, dias } : p)));
-    else if (onToast) onToast("Não foi possível salvar a validação");
-  });
-
   const salvar = async (form) => {
     if (salvando) return;
     setSalvando(true);
@@ -3055,6 +3069,15 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     ? programacoes.filter((p) => (p.nome || "").toLowerCase().includes(busca.trim().toLowerCase()))
     : programacoes;
 
+  // Ao escolher um exercício, já sugere o último objetivo que você usou para ele
+  const mapaObjetivos = {};
+  [...programacoes]
+    .sort((x, y) => (dataRefProgramacao(x) || 0) - (dataRefProgramacao(y) || 0))
+    .forEach((p) => p.dias.forEach((d) => exerciciosDoDia(d).forEach((e) => {
+      if (e.objetivo) mapaObjetivos[normalizarTexto(e.nome)] = e.objetivo;
+    })));
+  const objetivoSugerido = (nome) => mapaObjetivos[normalizarTexto(nome)] || "";
+
   // Semanas que já terminaram ficam recolhidas, abaixo do gráfico (destaque nunca é recolhido)
   const hoje0 = new Date();
   hoje0.setHours(0, 0, 0, 0);
@@ -3071,12 +3094,10 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     <ProgramacaoCard
       key={item.id}
       item={item}
-      protocolos={protocolos}
       expandido={expandidoId === item.id}
       onToggle={() => setExpandidoId(expandidoId === item.id ? null : item.id)}
       onEditar={abrirEdicao}
       onExcluir={excluir}
-      onValidar={validar}
       senha={senha}
     />
   );
@@ -3122,7 +3143,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
             </div>
           )}
           {atuais.map(renderCard)}
-          <GraficoProtocolosMes programacoes={programacoes} protocolos={protocolos} />
+          <GraficosProgramacao programacoes={programacoes} />
 
           {passadas.length > 0 && (
             <div style={{ marginTop: 18 }}>
@@ -3151,7 +3172,8 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
         <Sheet title={editando ? "Editar programação" : "Nova programação"} onClose={() => { setSheetAberto(false); setEditando(null); }}>
           <ProgramacaoForm
             inicial={editando ? programacoes.find((p) => p.id === editando) : null}
-            protocolos={protocolos}
+            biblioteca={biblioteca}
+            objetivoSugerido={objetivoSugerido}
             onSalvar={salvar}
             onCancelar={() => { setSheetAberto(false); setEditando(null); }}
             salvando={salvando}
