@@ -253,6 +253,33 @@ async function salvarExercicioDb(exercicio, editandoId) {
   }
   if (error) console.error(error);
 }
+// Troca o nome de um exercício em todas as programações (todas as pastas) e nos registros "treino executado"
+async function renomearExercicioNasProgramacoes(antigo, novo) {
+  const chave = limparNome(antigo);
+  const lista = await fetchProgramacoes();
+  let alteradas = 0;
+  for (const pr of lista) {
+    let alterou = false;
+    const dias = pr.dias.map((d) => {
+      const ex = exerciciosDoDia(d);
+      const tr = treinosDoDia(d);
+      const temEx = ex.some((e) => limparNome(e.nome) === chave);
+      const temTr = tr.some((t) => (t.adicionados || []).some((n) => limparNome(n) === chave));
+      if (!temEx && !temTr) return d;
+      alterou = true;
+      const vistos = new Set();
+      const exercicios = ex
+        .map((e) => (limparNome(e.nome) === chave ? { ...e, nome: novo } : e))
+        .filter((e) => { const k = limparNome(e.nome); if (vistos.has(k)) return false; vistos.add(k); return true; }); // sem repetir no mesmo dia
+      const treinos = tr.map((t) => (t.adicionados
+        ? { ...t, adicionados: t.adicionados.map((n) => (limparNome(n) === chave ? novo : n)) }
+        : t));
+      return { ...d, exercicios, treinos };
+    });
+    if (alterou && (await atualizarProgramacaoDb(pr.id, { ...pr, dias }))) alteradas++;
+  }
+  return alteradas;
+}
 async function excluirExercicioDb(id) {
   const { error } = await supabase.from("exercicios").delete().eq("id", id);
   if (error) console.error(error);
@@ -1091,6 +1118,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const [catAberto, setCatAberto] = useState(false); // janela de categorias
   const [edicaoCat, setEdicaoCat] = useState({}); // nomes digitados ao renomear categorias
   const [copiaEx, setCopiaEx] = useState(false); // formulário aberto a partir de "Duplicar"
+  const [pendenteOrigem, setPendenteOrigem] = useState(null); // nome original quando o cadastro vem da lista "A cadastrar"
   const [form, setForm] = useState({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
   const { pedir, Modal } = useSenhaGate(senha);
 
@@ -1121,6 +1149,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
 
   const abrirNovo = () => pedir(() => {
     setEditando(null);
+    setPendenteOrigem(null);
     setCopiaEx(false);
     setNovaCategoria(false);
     setForm({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
@@ -1128,15 +1157,17 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   });
   const abrirNovoComNome = (nome) => pedir(() => {
     setEditando(null);
+    setPendenteOrigem(nome);
     setCopiaEx(false);
     setNovaCategoria(false);
     setForm({ nome, nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
     setSheetAberto(true);
   });
-  const abrirEdicao = (ex) => pedir(() => { setEditando(ex.id); setCopiaEx(false); setNovaCategoria(false); setForm(ex); setSheetAberto(true); });
+  const abrirEdicao = (ex) => pedir(() => { setEditando(ex.id); setPendenteOrigem(null); setCopiaEx(false); setNovaCategoria(false); setForm(ex); setSheetAberto(true); });
   // Duplicar: abre o formulário já preenchido como um exercício NOVO (só é criado quando você salvar)
   const duplicarExercicio = (ex) => pedir(() => {
     setEditando(null);
+    setPendenteOrigem(null);
     setCopiaEx(true);
     setNovaCategoria(false);
     setForm({ ...ex, nome: `${ex.nome} (cópia)` });
@@ -1144,6 +1175,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   });
   const duplicarDoForm = () => {
     setEditando(null);
+    setPendenteOrigem(null);
     setCopiaEx(true);
     setForm({ ...form, nome: `${form.nome} (cópia)` });
   };
@@ -1159,10 +1191,22 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
 
   const salvar = async () => {
     if (!form.nome.trim() || salvando) return;
+    // Veio da lista "A cadastrar" e o nome mudou? Pergunta se troca o nome nas programações também.
+    let trocarNasProgramacoes = false;
+    if (pendenteOrigem && !editando && limparNome(form.nome) !== limparNome(pendenteOrigem)) {
+      trocarNasProgramacoes = window.confirm(
+        `Você mudou o nome de "${pendenteOrigem}" para "${form.nome.trim()}".\n\n` +
+        `OK = trocar o nome também em todas as programações (a pendência some).\n` +
+        `Cancelar = manter "${pendenteOrigem}" nas programações (a pendência continua na lista).`
+      );
+    }
     setSalvando(true);
     await salvarExercicioDb(form, editando);
+    if (trocarNasProgramacoes) await renomearExercicioNasProgramacoes(pendenteOrigem, form.nome.trim());
+    setProgramacoes(await fetchProgramacoes());
     setSalvando(false);
     setSheetAberto(false);
+    setPendenteOrigem(null);
     recarregar();
   };
   // Exclusão só existe dentro da tela de edição (que já exige a senha)
@@ -1334,7 +1378,12 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
       )}
 
       {sheetAberto && (
-        <Sheet title={editando ? "Editar exercício" : copiaEx ? "Exercício duplicado" : "Novo exercício"} onClose={() => setSheetAberto(false)}>
+        <Sheet title={editando ? "Editar exercício" : copiaEx ? "Exercício duplicado" : pendenteOrigem ? "Cadastrar exercício" : "Novo exercício"} onClose={() => setSheetAberto(false)}>
+          {pendenteOrigem && !editando && (
+            <div style={{ fontSize: 12.5, color: "#FF8A3D", background: "rgba(255,138,61,0.08)", border: "1px solid rgba(255,138,61,0.35)", borderRadius: 8, padding: "8px 10px", marginBottom: 14, lineHeight: 1.45 }}>
+              Nome usado nas programações: <b>{pendenteOrigem}</b>. Você pode mudar o nome abaixo; ao salvar com outro nome, o app pergunta se troca nas programações também.
+            </div>
+          )}
           {copiaEx && (
             <div style={{ fontSize: 12.5, color: "#E4DE00", background: "rgba(228,222,0,0.08)", border: "1px solid rgba(228,222,0,0.3)", borderRadius: 8, padding: "8px 10px", marginBottom: 14, lineHeight: 1.4 }}>
               Cópia pronta para editar. Ajuste o nome e o que precisar e toque em Salvar para criar o exercício novo.
