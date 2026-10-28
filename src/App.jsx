@@ -216,6 +216,7 @@ const workoutFromDb = (r) => ({
   skill: r.skill || "", blocos: r.blocos && r.blocos.length ? r.blocos : [blocoVazio()],
   protocoloId: r.protocolo_id || "",
   favorito: !!r.favorito,
+  resultados: Array.isArray(r.resultados) ? r.resultados : [],
   criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
 });
 const workoutToDb = (w) => ({
@@ -340,6 +341,12 @@ async function searchWorkoutsDb(termo) {
   if (error) { console.error(error); return []; }
   return data.map(workoutFromDb);
 }
+// Resultados (turma/pessoa) ficam numa coluna própria: ver workouts_resultados.sql
+async function salvarResultadosDb(id, lista) {
+  const { error } = await supabase.from("workouts").update({ resultados: lista }).eq("id", id);
+  if (error) console.error(error);
+  return !error;
+}
 // Favoritar não passa pelo formulário do treino (coluna "favorito": ver workouts_favorito.sql)
 async function definirFavoritoDb(id, valor) {
   const { error } = await supabase.from("workouts").update({ favorito: valor }).eq("id", id);
@@ -371,7 +378,7 @@ async function fetchTodosWorkouts() {
 }
 // Todos os treinos que têm resultado registrado em algum bloco (filtra no aparelho)
 async function fetchWorkoutsComResultado() {
-  return (await fetchTodosWorkouts()).filter((w) => (w.blocos || []).some((b) => (b.resultado || "").trim()));
+  return (await fetchTodosWorkouts()).filter(temResultadoTreino);
 }
 async function fetchWorkoutById(id) {
   const { data, error } = await supabase.from("workouts").select("*").eq("id", id).maybeSingle();
@@ -732,6 +739,38 @@ function avaliacaoDesatualizada(iso) {
   limite.setMonth(limite.getMonth() - 3);
   return new Date(iso) < limite;
 }
+// Link só de visualização dos RESULTADOS (sem botão de voltar nem outras telas). Com resultadoId, mostra só aquele resultado.
+function buildShareUrlResultados(workoutId, resultadoId) {
+  const { origin, pathname } = window.location;
+  return `${origin}${pathname}#/v/${workoutId}${resultadoId ? `/${resultadoId}` : ""}`;
+}
+// "2026-10-27" -> "27/10/26"
+function formatarDataCurta(iso) {
+  const d = parseDataLocal(iso);
+  if (!d) return "";
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)}`;
+}
+function rotuloResultado(r) {
+  const data = formatarDataCurta(r.data);
+  if (r.tipo === "pessoa") return `Resultados de ${r.pessoa || "—"}${data ? ` · ${data}` : ""}`;
+  return `Resultados da turma no dia${data ? `: ${data}` : ""}`;
+}
+// Resultados novos (turma/pessoa) + o campo "Resultado" antigo de cada bloco
+function resultadosUnificados(w) {
+  const novos = (w.resultados || []).map((r) => ({ ...r, rotulo: rotuloResultado(r) }));
+  const antigos = (w.blocos || [])
+    .map((b, i) => ({ b, i }))
+    .filter(({ b }) => (b.resultado || "").trim())
+    .map(({ b, i }) => {
+      const d = b.resultadoData ? new Date(b.resultadoData) : null;
+      return {
+        id: `bloco-${b.id}`, tipo: "bloco", texto: b.resultado, data: d && !isNaN(d) ? dataISOLocal(d) : "",
+        rotulo: `Resultado · Workout ${i + 1}${b.titulo ? ` — ${b.titulo}` : ""}`,
+      };
+    });
+  return [...novos, ...antigos];
+}
+const temResultadoTreino = (w) => (w.resultados || []).length > 0 || (w.blocos || []).some((b) => (b.resultado || "").trim());
 function buildShareUrlAvaliacao() {
   const { origin, pathname } = window.location;
   return `${origin}${pathname}#/avaliacao`;
@@ -2027,7 +2066,74 @@ function SeloProtocolo({ protocolo }) {
   );
 }
 
-function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExecutarHoje, onDesfazerExecucao, onFavoritar, execucoes = [], expandido, onToggle, legendas, destaque, senha, protocolo }) {
+// Janela para inserir/editar um resultado: da turma num dia, ou de uma pessoa
+function ResultadoSheet({ w, inicial, salvando, onSalvar, onFechar }) {
+  const [tipo, setTipo] = useState(inicial ? inicial.tipo : "turma");
+  const [pessoa, setPessoa] = useState(inicial ? inicial.pessoa || "" : "");
+  const [data, setData] = useState(inicial ? inicial.data || "" : dataISOLocal(new Date()));
+  const [bloco, setBloco] = useState(inicial ? inicial.bloco || "" : "");
+  const [texto, setTexto] = useState(inicial ? inicial.texto || "" : "");
+  const [erro, setErro] = useState("");
+  const blocos = w.blocos || [];
+
+  const salvar = () => {
+    if (tipo === "pessoa" && !pessoa.trim()) { setErro("Digite o nome da pessoa."); return; }
+    if (!texto.trim()) { setErro("Escreva o resultado."); return; }
+    setErro("");
+    onSalvar({
+      id: inicial ? inicial.id : undefined,
+      criadoEm: inicial ? inicial.criadoEm : undefined,
+      tipo, pessoa: tipo === "pessoa" ? pessoa.trim() : "", data, bloco, texto: texto.trim(),
+    });
+  };
+
+  return (
+    <Sheet title={inicial ? "Editar resultado" : "Inserir resultado"} onClose={onFechar}>
+      <div style={{ fontSize: 12.5, color: "#B9BABF", marginBottom: 14 }}>
+        <b style={{ color: "#F1EFE9" }}>{w.nome || "Treino"}</b>{w.codigo ? ` · #${w.codigo}` : ""}
+      </div>
+      <Field label="Resultado de">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Chip ativo={tipo === "turma"} onClick={() => setTipo("turma")}>Turma no dia</Chip>
+          <Chip ativo={tipo === "pessoa"} onClick={() => setTipo("pessoa")}>Uma pessoa</Chip>
+        </div>
+      </Field>
+      {tipo === "pessoa" && (
+        <Field label="Nome">
+          <TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} placeholder="Ex: Fulano" />
+        </Field>
+      )}
+      <Field label={tipo === "turma" ? "Dia da turma" : "Data (opcional)"}>
+        <TextInput type="date" value={data} onChange={(e) => setData(e.target.value)} />
+      </Field>
+      {blocos.length > 1 && (
+        <Field label="Workout">
+          <Select value={bloco} onChange={(e) => setBloco(e.target.value)}>
+            <option value="">Geral (treino todo)</option>
+            {blocos.map((b, i) => <option key={b.id} value={b.id}>Workout {i + 1}{b.titulo ? ` – ${b.titulo}` : ""}</option>)}
+          </Select>
+        </Field>
+      )}
+      <Field label="Resultado">
+        <AutoTextArea
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          placeholder={`Uma linha por pessoa, por exemplo:\nAlex — 11'22"\nLívia — 15'25"\nFábio — TC`}
+          style={{ minHeight: 140 }}
+        />
+      </Field>
+      {erro && <div style={{ color: "#E6483F", fontSize: 12.5, marginBottom: 12 }}>{erro}</div>}
+      <div style={{ display: "flex", gap: 10 }}>
+        <GhostButton onClick={onFechar} style={{ flex: 1 }}>Cancelar</GhostButton>
+        <PrimaryButton onClick={salvar} disabled={salvando} style={{ flex: 1.4 }}>
+          <Save size={16} /> {salvando ? "Salvando..." : "Salvar resultado"}
+        </PrimaryButton>
+      </div>
+    </Sheet>
+  );
+}
+
+function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExecutarHoje, onDesfazerExecucao, onFavoritar, onInserirResultado, onEditarResultado, onExcluirResultado, onCompartilharResultados, execucoes = [], expandido, onToggle, legendas, destaque, senha, protocolo }) {
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
     <div style={{
@@ -2072,6 +2178,37 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExe
       {expandido && (
         <div style={{ padding: "0 16px 16px", borderTop: "1px solid #2E2F34" }}>
           <WorkoutDetalhes w={w} legendas={legendas} />
+          {(w.resultados || []).length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.06em" }}>RESULTADOS</span>
+                <button
+                  onClick={() => onCompartilharResultados(w, null)}
+                  style={{ background: "none", border: "none", color: "#9A9A94", fontSize: 12, textDecoration: "underline", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 5 }}
+                >
+                  <Share2 size={12} /> compartilhar todos
+                </button>
+              </div>
+              {w.resultados.map((r) => {
+                const idxBloco = r.bloco ? (w.blocos || []).findIndex((b) => b.id === r.bloco) : -1;
+                return (
+                  <div key={r.id} style={{ background: "rgba(228,222,0,0.07)", border: "1px solid rgba(228,222,0,0.3)", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                        {rotuloResultado(r)}{idxBloco >= 0 ? ` · Workout ${idxBloco + 1}` : ""}
+                      </span>
+                      <span style={{ display: "flex", gap: 12, flexShrink: 0 }}>
+                        <Share2 size={15} color="#9A9A94" style={{ cursor: "pointer" }} onClick={() => onCompartilharResultados(w, r.id)} />
+                        <Pencil size={15} color="#9A9A94" style={{ cursor: "pointer" }} onClick={() => onEditarResultado(w, r)} />
+                        <Trash2 size={15} color="#9A9A94" style={{ cursor: "pointer" }} onClick={() => onExcluirResultado(w, r)} />
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 14, color: "#F1EFE9", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{r.texto}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {execucoes.length > 0 && (
             <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 5 }}>
               {execucoes.map((ex, i) => (
@@ -2089,7 +2226,9 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExe
           )}
           <div style={{ display: "flex", gap: 10, marginTop: execucoes.length > 0 ? 10 : 18, flexWrap: "wrap" }}>
             <PrimaryButton onClick={() => onExecutarHoje(w)} style={{ flex: "1 1 100%" }}><Check size={16} /> Treino executado hoje</PrimaryButton>
-            <GhostButton onClick={() => onCompartilhar(w)} style={{ flex: "1 1 40%" }}><Share2 size={14} /> Compartilhar</GhostButton>
+            <GhostButton onClick={() => onInserirResultado(w)} style={{ flex: "1 1 100%", color: "#E4DE00", borderColor: "#E4DE00" }}><Plus size={15} /> Inserir resultado</GhostButton>
+            <GhostButton onClick={() => onCompartilharResultados(w, null)} style={{ flex: "1 1 100%" }}><Share2 size={14} /> Compartilhar resultados (só visualização)</GhostButton>
+            <GhostButton onClick={() => onCompartilhar(w)} style={{ flex: "1 1 40%" }}><Share2 size={14} /> Compartilhar treino</GhostButton>
             <GhostButton onClick={() => onDuplicar(w)} style={{ flex: "1 1 40%" }}><Copy size={14} /> Duplicar</GhostButton>
             <GhostButton onClick={() => onEditar(w)} style={{ flex: "1 1 40%" }}><Pencil size={14} /> Editar</GhostButton>
             <GhostButton onClick={() => onExcluir(w.id)} style={{ flex: "1 1 40%" }}><Trash2 size={14} /> Excluir</GhostButton>
@@ -2254,6 +2393,12 @@ function BannerDestaque({ banner, setBanner, senha }) {
                   )}
                 </div>
               ))}
+              {(workoutDoBanner.resultados || []).map((r) => (
+                <div key={r.id} style={{ marginBottom: 10, background: "rgba(228,222,0,0.10)", border: "1px solid rgba(228,222,0,0.35)", borderRadius: 8, padding: "8px 10px" }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 3 }}>{rotuloResultado(r)}</div>
+                  <div style={{ fontSize: 13.5, color: "#F1EFE9", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{r.texto}</div>
+                </div>
+              ))}
               <a
                 href={buildShareUrl(workoutDoBanner.id)}
                 onClick={(e) => { e.preventDefault(); window.location.hash = `/w/${workoutDoBanner.id}`; }}
@@ -2349,6 +2494,8 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const [copiaInicial, setCopiaInicial] = useState(null); // treino duplicado, ainda não salvo
   const [biblioteca, setBiblioteca] = useState([]); // para sugerir exercícios e reconhecer o treino executado
   const [programacoesExec, setProgramacoesExec] = useState([]);
+  const [resultadoSheet, setResultadoSheet] = useState(null); // { w, edit } enquanto a janela de resultado está aberta
+  const [salvandoRes, setSalvandoRes] = useState(false);
   const [execucao, setExecucao] = useState(null); // { w } enquanto a janela "Treino executado" está aberta
   const [salvandoExec, setSalvandoExec] = useState(false);
   const [salvandoTreino, setSalvandoTreino] = useState(false);
@@ -2482,6 +2629,38 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setRecentes(mapa); setWorkouts(mapa); setResultadosBusca(mapa); setListaResultados(mapa); setTodosTreinos(mapa);
     setTreinoDestaque((prev) => (prev && prev.id === id ? { ...prev, ...patch } : prev));
   };
+  // Resultados da turma / de uma pessoa
+  const abrirResultado = (w, edit = null) => pedir(() => setResultadoSheet({ w, edit }));
+  const gravarResultados = async (w, lista, msgOk) => {
+    const ok = await salvarResultadosDb(w.id, lista);
+    if (!ok) { if (onToast) onToast("Não foi possível salvar: rode o SQL dos resultados (workouts_resultados.sql)"); return false; }
+    atualizarLocal(w.id, { resultados: lista });
+    if (onToast && msgOk) onToast(msgOk);
+    return true;
+  };
+  const salvarResultado = async (entrada) => {
+    if (salvandoRes || !resultadoSheet) return;
+    setSalvandoRes(true);
+    const w = resultadoSheet.w;
+    const fresco = await fetchWorkoutById(w.id); // versão mais recente do treino
+    const base = (fresco && fresco.resultados) || [];
+    const item = { ...entrada, id: entrada.id || uid(), criadoEm: entrada.criadoEm || new Date().toISOString() };
+    const lista = entrada.id ? base.map((r) => (r.id === entrada.id ? item : r)) : [...base, item];
+    const ok = await gravarResultados(w, lista, entrada.id ? "Resultado atualizado" : "Resultado salvo");
+    setSalvandoRes(false);
+    if (ok) setResultadoSheet(null);
+  };
+  const excluirResultado = (w, r) => pedir(async () => {
+    if (!window.confirm(`Excluir "${rotuloResultado(r)}"?`)) return;
+    const fresco = await fetchWorkoutById(w.id);
+    const lista = ((fresco && fresco.resultados) || []).filter((x) => x.id !== r.id);
+    await gravarResultados(w, lista, "Resultado excluído");
+  });
+  const compartilharResultados = async (w, resId) => {
+    const ok = await copyToClipboard(buildShareUrlResultados(w.id, resId));
+    if (onToast) onToast(ok ? "Link de resultados copiado (só visualização)" : "Não foi possível copiar");
+  };
+
   const favoritar = (w) => pedir(async () => {
     const novo = !w.favorito;
     const ok = await definirFavoritoDb(w.id, novo);
@@ -2603,7 +2782,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const resultadosFiltrados = listaResultados.filter((w) =>
     !termoRes || [w.nome, w.codigo, w.tags].filter(Boolean).join(" ").toLowerCase().includes(termoRes));
   // Filtros combinados (todos juntos) + busca de texto, feitos no aparelho
-  const temResultado = (w) => (w.blocos || []).some((b) => (b.resultado || "").trim());
+  const temResultado = temResultadoTreino;
   const foiExecutado = (w) => (execucoesPorTreino[w.id] || []).length > 0;
   const passaFiltros = (w) => {
     if (soFavoritos && !w.favorito) return false;
@@ -2792,6 +2971,10 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               onDuplicar={duplicarTreino}
               onExecutarHoje={abrirExecucao}
               onFavoritar={favoritar}
+              onInserirResultado={abrirResultado}
+              onEditarResultado={abrirResultado}
+              onExcluirResultado={excluirResultado}
+              onCompartilharResultados={compartilharResultados}
               onDesfazerExecucao={desfazerExecucao}
               execucoes={execucoesPorTreino[w.id] || []}
               onExcluir={excluir} onCompartilhar={compartilhar} legendas={legendas}
@@ -2811,6 +2994,16 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
             </GhostButton>
           )}
         </>
+      )}
+
+      {resultadoSheet && (
+        <ResultadoSheet
+          w={resultadoSheet.w}
+          inicial={resultadoSheet.edit}
+          salvando={salvandoRes}
+          onSalvar={salvarResultado}
+          onFechar={() => setResultadoSheet(null)}
+        />
       )}
 
       {execucao && (
@@ -4547,6 +4740,93 @@ function AvaliacaoHome({ senha, onToast }) {
    TELA SOMENTE-LEITURA (aberta via link compartilhado)
 ================================================================= */
 
+// Página compartilhada dos RESULTADOS: sem botão de voltar, sem abas, sem links. Resultados em destaque; o treino fica recolhido.
+function ViewOnlyResultados({ id, resId, legendas }) {
+  const [w, setW] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [mostrarTreino, setMostrarTreino] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setW(await fetchWorkoutById(id));
+      setCarregando(false);
+    })();
+  }, [id]);
+
+  const topo = (
+    <div style={{ padding: "20px 16px 10px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ width: 32, height: 32, borderRadius: 8, background: "#E4DE00", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Dumbbell size={18} color="#0A0A0A" />
+      </div>
+      <div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
+        <div style={{ fontSize: 9, color: "#E4DE00", letterSpacing: "0.35em", marginTop: 2 }}>FITNESS</div>
+      </div>
+      <Badge>somente visualização</Badge>
+    </div>
+  );
+
+  if (!w) {
+    return (
+      <div style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
+        <style>{FONT_IMPORT}</style>
+        {topo}
+        <div style={{ color: "#9A9A94", textAlign: "center", marginTop: 60, fontSize: 14, padding: "0 20px" }}>
+          {carregando ? "Carregando resultados..." : "Resultados não encontrados (o link pode estar errado ou o treino foi removido)."}
+        </div>
+      </div>
+    );
+  }
+
+  const todos = resultadosUnificados(w);
+  const lista = resId ? todos.filter((r) => r.id === resId) : todos;
+  const semResultados = lista.length === 0;
+  const treinoAberto = mostrarTreino || semResultados;
+
+  return (
+    <div style={{ background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif", paddingBottom: 40 }}>
+      <style>{FONT_IMPORT}</style>
+      {topo}
+      <div style={{ padding: "18px 16px 0", maxWidth: 640, margin: "0 auto" }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: "#9A9A94", textTransform: "uppercase", letterSpacing: "0.04em" }}>{w.nome || "Treino"}</div>
+        <div style={{ fontSize: 12, color: "#71727A", marginTop: 3, marginBottom: 14 }}>{w.data}</div>
+
+        {semResultados && (
+          <div style={{ background: "#1A1B1E", border: "1px dashed #3A3B40", borderRadius: 12, padding: 18, textAlign: "center", color: "#9A9A94", fontSize: 14, marginBottom: 14 }}>
+            Ainda não há resultados registrados para este treino.
+          </div>
+        )}
+
+        {lista.map((r) => (
+          <div key={r.id} style={{ background: "rgba(228,222,0,0.07)", border: "1px solid rgba(228,222,0,0.4)", borderLeft: "4px solid #E4DE00", borderRadius: 12, padding: "16px 16px 18px", marginBottom: 14 }}>
+            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 17, color: "#E4DE00", letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.2 }}>
+              {r.rotulo || rotuloResultado(r)}
+            </div>
+            <div style={{ marginTop: 10, fontSize: 20, fontWeight: 600, color: "#FFFFFF", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{r.texto}</div>
+          </div>
+        ))}
+
+        <button
+          onClick={() => setMostrarTreino(!mostrarTreino)}
+          disabled={semResultados}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: semResultados ? "default" : "pointer",
+            background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 10, padding: "12px 14px", color: "#9A9A94", fontSize: 13.5, fontWeight: 700, marginTop: 6,
+          }}
+        >
+          <span>Treino do dia</span>
+          {!semResultados && (treinoAberto ? <ChevronUp size={18} /> : <ChevronDown size={18} />)}
+        </button>
+        {treinoAberto && (
+          <div style={{ background: "#16171A", border: "1px solid #26272B", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "4px 14px 14px" }}>
+            <WorkoutDetalhes w={w} legendas={legendas} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ViewOnlyWorkout({ id, legendas }) {
   const [w, setW] = useState(null);
   const [protocolo, setProtocolo] = useState(null);
@@ -4609,6 +4889,10 @@ function ViewOnlyWorkout({ id, legendas }) {
 function parseHashWorkoutId() {
   const m = window.location.hash.match(/^#\/w\/(.+)$/);
   return m ? m[1] : null;
+}
+function parseHashResultados() {
+  const m = window.location.hash.match(/^#\/v\/([^/]+)(?:\/([^/]+))?$/);
+  return m ? { id: m[1], resId: m[2] || null } : null;
 }
 function parseHashAvaliacao() {
   return window.location.hash === "#/avaliacao";
@@ -4679,6 +4963,7 @@ export default function App() {
   const [viewOnlyId, setViewOnlyId] = useState(parseHashWorkoutId());
   const [viewOnlyProtocoloId, setViewOnlyProtocoloId] = useState(parseHashProtocoloId());
   const [viewAvaliacao, setViewAvaliacao] = useState(parseHashAvaliacao());
+  const [viewResultados, setViewResultados] = useState(parseHashResultados());
 
   const mostrarToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
@@ -4687,6 +4972,7 @@ export default function App() {
       setViewOnlyId(parseHashWorkoutId());
       setViewOnlyProtocoloId(parseHashProtocoloId());
       setViewAvaliacao(parseHashAvaliacao());
+      setViewResultados(parseHashResultados());
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -4707,6 +4993,7 @@ export default function App() {
     })();
   }, []);
 
+  if (viewResultados) return <ViewOnlyResultados id={viewResultados.id} resId={viewResultados.resId} legendas={legendas} />;
   if (viewAvaliacao) return <AvaliacaoPage onVoltar={() => { window.location.hash = ""; setViewAvaliacao(false); }} />;
   if (viewOnlyId) return <ProtocoloViewerProvider><ViewOnlyWorkout id={viewOnlyId} legendas={legendas} /></ProtocoloViewerProvider>;
   if (viewOnlyProtocoloId) {
