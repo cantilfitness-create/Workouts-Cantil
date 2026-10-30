@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, Trash2, Pencil, Timer,
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
-  ClipboardList, AlertCircle, BarChart3, Copy, Folder, SlidersHorizontal
+  ClipboardList, AlertCircle, BarChart3, Copy, Folder, SlidersHorizontal, FlaskConical
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -543,6 +543,44 @@ async function fetchProgramacoes() {
   if (error) { console.error(error); return []; }
   return data.map(programacaoFromDb);
 }
+/* ---------------------------- pasta fixa: ESTUDOS & CIÊNCIA ---------------------------- */
+const NOME_PASTA_ESTUDOS = "ESTUDOS & CIÊNCIA DO TREINAMENTO";
+const DESCRICAO_PASTA_ESTUDOS =
+  "Base científica, estudos, exercícios, métodos, protocolos e desenvolvimento do treinamento híbrido, dicas e informativos";
+const FONTES_ESTUDO = ["PubMed", "Instagram", "Google", "IA", "Outro"];
+const estudoVazio = () => ({ titulo: "", fonte: "PubMed", link: "", resumo: "", descricao: "" });
+const estudoFromDb = (r) => ({
+  id: r.id, titulo: r.titulo || "", fonte: r.fonte || "Outro", link: r.link || "",
+  resumo: r.resumo || "", descricao: r.descricao || "", criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
+});
+async function listarEstudosDb(senha) {
+  const { data, error } = await supabase.rpc("estudos_listar", { p_senha: senha });
+  if (error) { console.error(error); return null; }
+  return (data || []).map(estudoFromDb);
+}
+async function salvarEstudoDb(senha, e) {
+  const { data, error } = await supabase.rpc("estudos_salvar", {
+    p_senha: senha, p_id: e.id || null, p_titulo: e.titulo, p_fonte: e.fonte,
+    p_link: e.link || "", p_resumo: e.resumo || "", p_descricao: e.descricao || "",
+  });
+  if (error) { console.error(error); return null; }
+  return estudoFromDb(data);
+}
+async function excluirEstudoDb(senha, id) {
+  const { error } = await supabase.rpc("estudos_excluir", { p_senha: senha, p_id: id });
+  if (error) console.error(error);
+  return !error;
+}
+// Trecho automático do início do texto (usado quando o estudo não tem resumo escrito)
+function trechoDe(texto, max = 320) {
+  const t = (texto || "").replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const corte = t.slice(0, max);
+  const fimFrase = Math.max(corte.lastIndexOf(". "), corte.lastIndexOf("; "));
+  if (fimFrase > 120) return corte.slice(0, fimFrase + 1);
+  return `${corte.slice(0, corte.lastIndexOf(" "))}…`;
+}
+
 // Se colunas novas (pasta, semana_inicio, descricao) ainda não existem no banco, tenta salvar sem elas
 async function gravarProgramacao(executar, payload) {
   const { pasta, ...semPasta } = payload;
@@ -4022,6 +4060,178 @@ function GraficosProgramacao({ programacoes }) {
   );
 }
 
+// Pasta fixa de estudos: fonte, título, resumo (aparece sempre ao tocar) e descrição completa
+function EstudosPasta({ senha, onVoltar, onToast }) {
+  const [lista, setLista] = useState(null); // null = carregando
+  const [erroCarga, setErroCarga] = useState(false);
+  const [busca, setBusca] = useState("");
+  const [filtroFonte, setFiltroFonte] = useState("");
+  const [abertoId, setAbertoId] = useState(null);
+  const [descAbertaId, setDescAbertaId] = useState(null);
+  const [sheetAberto, setSheetAberto] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [form, setForm] = useState(estudoVazio());
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const carregar = useCallback(async () => {
+    const r = await listarEstudosDb(senha);
+    if (r === null) { setErroCarga(true); setLista([]); return; }
+    setErroCarga(false);
+    setLista(r);
+  }, [senha]);
+  useEffect(() => { carregar(); }, [carregar]);
+
+  const abrirNovo = () => { setEditando(null); setForm(estudoVazio()); setErro(""); setSheetAberto(true); };
+  const abrirEdicao = (e) => { setEditando(e.id); setForm({ ...e }); setErro(""); setSheetAberto(true); };
+  const salvar = async () => {
+    if (salvando) return;
+    if (!form.titulo.trim()) { setErro("Dê um título ao estudo."); return; }
+    setErro("");
+    setSalvando(true);
+    const r = await salvarEstudoDb(senha, { ...form, titulo: form.titulo.trim(), id: editando });
+    setSalvando(false);
+    if (!r) { setErro("Não foi possível salvar. Rode o SQL dos estudos no Supabase (estudos_ciencia.sql)."); return; }
+    setSheetAberto(false);
+    setAbertoId(r.id);
+    if (onToast) onToast("Estudo salvo");
+    carregar();
+  };
+  const excluir = async (e) => {
+    if (!window.confirm(`Excluir o estudo "${e.titulo}"? Essa ação não pode ser desfeita.`)) return;
+    if (await excluirEstudoDb(senha, e.id)) { setAbertoId(null); if (onToast) onToast("Estudo excluído"); carregar(); }
+    else if (onToast) onToast("Não foi possível excluir");
+  };
+
+  const termo = busca.trim().toLowerCase();
+  const filtrados = (lista || []).filter((e) =>
+    (!filtroFonte || e.fonte === filtroFonte) &&
+    (!termo || [e.titulo, e.fonte, e.resumo, e.descricao].join(" ").toLowerCase().includes(termo)));
+
+  const chip = (ativo) => ({
+    flexShrink: 0, cursor: "pointer", whiteSpace: "nowrap", borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: ativo ? 800 : 600,
+    background: ativo ? "#E4DE00" : "#1C1D20", color: ativo ? "#0A0A0A" : "#B9BABF", border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}`,
+  });
+
+  return (
+    <div>
+      <button onClick={onVoltar} style={{ background: "none", border: "none", color: "#E4DE00", fontSize: 13, fontWeight: 700, padding: 0, marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+        <ArrowLeft size={14} /> Pastas
+      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <FlaskConical size={20} color="#E4DE00" style={{ flexShrink: 0 }} />
+        <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, color: "#FFFFFF", letterSpacing: "0.04em", lineHeight: 1.15 }}>{NOME_PASTA_ESTUDOS}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: "#9A9A94", margin: "8px 0 14px", lineHeight: 1.45 }}>{DESCRICAO_PASTA_ESTUDOS}</div>
+
+      <PrimaryButton onClick={abrirNovo} style={{ width: "100%", marginBottom: 12 }}><Plus size={16} /> Novo estudo</PrimaryButton>
+
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <Search size={16} color="#71727A" style={{ position: "absolute", left: 12, top: 13 }} />
+        <TextInput value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por título, fonte ou conteúdo..." style={{ paddingLeft: 36 }} />
+      </div>
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 14 }}>
+        <button onClick={() => setFiltroFonte("")} style={chip(filtroFonte === "")}>Todas</button>
+        {FONTES_ESTUDO.map((f) => <button key={f} onClick={() => setFiltroFonte(filtroFonte === f ? "" : f)} style={chip(filtroFonte === f)}>{f}</button>)}
+      </div>
+
+      {lista === null && <Spinner label="Carregando estudos..." />}
+      {erroCarga && (
+        <div style={{ fontSize: 12.5, color: "#FF8A3D", lineHeight: 1.45, marginBottom: 12 }}>
+          Não foi possível carregar os estudos. Confira se o SQL dos estudos foi rodado no Supabase (estudos_ciencia.sql).
+        </div>
+      )}
+      {lista !== null && !erroCarga && filtrados.length === 0 && (
+        <EmptyState text={(lista || []).length === 0 ? "Nenhum estudo ainda. Toque em 'Novo estudo'." : "Nenhum estudo encontrado."} />
+      )}
+
+      {filtrados.map((e) => {
+        const aberto = abertoId === e.id;
+        const resumo = e.resumo.trim() ? { texto: e.resumo.trim(), auto: false } : { texto: trechoDe(e.descricao), auto: true };
+        const descAberta = descAbertaId === e.id;
+        return (
+          <div key={e.id} style={{ background: "#1A1B1E", border: "1px solid #26272B", borderLeft: "3px solid #E4DE00", borderRadius: 12, marginBottom: 10, overflow: "hidden" }}>
+            <button
+              onClick={() => setAbertoId(aberto ? null : e.id)}
+              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "none", border: "none", cursor: "pointer", padding: "13px 14px", textAlign: "left" }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: "#FFFFFF", letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.2 }}>{e.titulo}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                  <Badge>{e.fonte}</Badge>
+                  {e.atualizadoEm && <span style={{ fontSize: 11, color: "#5f6066" }}>{formatarDataHora(e.atualizadoEm)}</span>}
+                </div>
+              </div>
+              {aberto ? <ChevronUp size={18} color="#71727A" /> : <ChevronDown size={18} color="#71727A" />}
+            </button>
+
+            {aberto && (
+              <div style={{ padding: "0 14px 14px", borderTop: "1px solid #2E2F34" }}>
+                <div style={{ marginTop: 12, background: "rgba(228,222,0,0.07)", border: "1px solid rgba(228,222,0,0.3)", borderRadius: 10, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
+                    Resumo{resumo.auto && resumo.texto ? " (trecho automático)" : ""}
+                  </div>
+                  <div style={{ fontSize: 14, color: "#F1EFE9", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+                    {resumo.texto || "Sem resumo ainda. Toque em Editar para escrever um."}
+                  </div>
+                </div>
+                {e.link && (
+                  <a href={e.link} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, color: "#E4DE00", fontSize: 13, fontWeight: 700, textDecoration: "none" }}>
+                    <LinkIcon size={14} /> Abrir fonte
+                  </a>
+                )}
+                {e.descricao.trim() && (
+                  <div style={{ marginTop: 10 }}>
+                    <button onClick={() => setDescAbertaId(descAberta ? null : e.id)} style={{ background: "none", border: "none", color: "#9A9A94", fontSize: 12.5, fontWeight: 700, padding: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      {descAberta ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {descAberta ? "Esconder descrição completa" : "Ver descrição completa"}
+                    </button>
+                    {descAberta && (
+                      <div style={{ marginTop: 8, fontSize: 13.5, color: "#D8D8D3", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{e.descricao}</div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <GhostButton onClick={() => abrirEdicao(e)} style={{ flex: 1, padding: "8px 10px", fontSize: 13 }}><Pencil size={13} /> Editar</GhostButton>
+                  <GhostButton onClick={() => excluir(e)} style={{ flex: 1, padding: "8px 10px", fontSize: 13, color: "#E6483F", borderColor: "#E6483F55" }}><Trash2 size={13} /> Excluir</GhostButton>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {sheetAberto && (
+        <Sheet title={editando ? "Editar estudo" : "Novo estudo"} onClose={() => setSheetAberto(false)}>
+          <Field label="Fonte">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {FONTES_ESTUDO.map((f) => <Chip key={f} ativo={form.fonte === f} onClick={() => setForm({ ...form, fonte: f })}>{f}</Chip>)}
+            </div>
+          </Field>
+          <Field label="Título">
+            <TextInput value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder="Ex: Treino concorrente: força + endurance" />
+          </Field>
+          <Field label="Link da fonte (opcional)">
+            <TextInput value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://..." inputMode="url" autoCapitalize="none" />
+          </Field>
+          <Field label="Espaço para descrever">
+            <AutoTextArea value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Cole aqui o conteúdo, os pontos principais, anotações..." style={{ minHeight: 160 }} />
+          </Field>
+          <Field label="Resumo (aparece sempre ao tocar no estudo)">
+            <AutoTextArea value={form.resumo} onChange={(e) => setForm({ ...form, resumo: e.target.value })} placeholder="O essencial em poucas linhas. Se deixar vazio, o app mostra um trecho do começo da descrição." style={{ minHeight: 90 }} />
+          </Field>
+          {erro && <div style={{ color: "#E6483F", fontSize: 12.5, marginBottom: 12, lineHeight: 1.4 }}>{erro}</div>}
+          <div style={{ display: "flex", gap: 10 }}>
+            <GhostButton onClick={() => setSheetAberto(false)} style={{ flex: 1 }}>Cancelar</GhostButton>
+            <PrimaryButton onClick={salvar} disabled={salvando} style={{ flex: 1.4 }}>
+              <Save size={16} /> {salvando ? "Salvando..." : "Salvar estudo"}
+            </PrimaryButton>
+          </div>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
 function ProgramacaoSemanalTab({ senha, onToast }) {
   const [programacoes, setProgramacoes] = useState([]);
   const [biblioteca, setBiblioteca] = useState([]);
@@ -4034,6 +4244,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
   const [expandidoId, setExpandidoId] = useState(null);
   const [mostrarPassadas, setMostrarPassadas] = useState(false);
   const [pastaAberta, setPastaAberta] = useState(null); // null = lista de pastas
+  const [estudosAberto, setEstudosAberto] = useState(false); // pasta fixa de estudos
   const { pedir, Modal } = useSenhaGate(senha);
 
   const carregar = useCallback(async () => {
@@ -4095,6 +4306,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
   const novaPasta = () => {
     const nome = (window.prompt("Nome da nova pasta (ex: Treino pessoal, Academia X, João):") || "").trim();
     if (!nome) return;
+    if (mesmaPasta(nome, NOME_PASTA_ESTUDOS)) { pedir(() => setEstudosAberto(true)); return; }
     const existente = pastas.find((pt) => mesmaPasta(pt.nome, nome));
     setPastaAberta(existente ? existente.nome : nome);
     if (!existente) abrirNovo(); // já abre a primeira semana da pasta nova
@@ -4151,6 +4363,10 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     />
   );
 
+  if (estudosAberto) {
+    return <EstudosPasta senha={senha} onVoltar={() => setEstudosAberto(false)} onToast={onToast} />;
+  }
+
   if (pastaAberta === null) {
     return (
       <div>
@@ -4185,6 +4401,24 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
                 <ChevronRight size={18} color="#71727A" />
               </button>
             ))}
+            {/* Pasta fixa (não é uma programação): estudos e ciência, protegida por senha */}
+            <button
+              onClick={() => pedir(() => setEstudosAberto(true))}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 12, textAlign: "left", cursor: "pointer",
+                background: "#1A1B1E", border: "1px solid #26272B", borderLeft: "3px solid #E4DE00", borderRadius: 12,
+                padding: "14px 14px", marginBottom: 10,
+              }}
+            >
+              <div style={{ width: 42, height: 42, borderRadius: 10, background: "rgba(228,222,0,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <FlaskConical size={22} color="#E4DE00" />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1.2 }}>{NOME_PASTA_ESTUDOS}</div>
+                <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 5, lineHeight: 1.4 }}>{DESCRICAO_PASTA_ESTUDOS}</div>
+              </div>
+              <Lock size={14} color="#71727A" style={{ flexShrink: 0 }} />
+            </button>
             <button
               onClick={novaPasta}
               style={{
