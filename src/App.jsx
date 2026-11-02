@@ -203,11 +203,12 @@ const botaoValidar = (ativo, cor) => ({
 const exercicioFromDb = (r) => ({
   id: r.id, nome: r.nome || "", grupoGrande: r.grupo_grande || "",
   grupoMenor: r.grupo_menor || "", equipamento: r.equipamento || "", descricao: r.descricao || "",
-  link: r.link || "", nivel: r.nivel || "",
+  link: r.link || "", nivel: r.nivel || "", apelidos: r.apelidos || "",
 });
 const exercicioToDb = (e) => ({
   nome: e.nome, grupo_grande: e.grupoGrande, grupo_menor: e.grupoMenor,
   equipamento: e.equipamento, descricao: e.descricao, link: e.link || "", nivel: e.nivel || "",
+  apelidos: e.apelidos || "",
 });
 
 const workoutFromDb = (r) => ({
@@ -242,17 +243,41 @@ async function fetchExercicios() {
   if (error) { console.error(error); return []; }
   return data.map(exercicioFromDb);
 }
+// Devolve "completo", "parcial" (alguma coluna nova ainda não existe no banco) ou "erro"
 async function salvarExercicioDb(exercicio, editandoId) {
   const payload = exercicioToDb(exercicio);
+  const { apelidos, ...semApelidos } = payload;
+  const { nivel, ...semNivelEApelidos } = semApelidos;
   const executar = (dados) => (editandoId
     ? supabase.from("exercicios").update(dados).eq("id", editandoId)
     : supabase.from("exercicios").insert(dados));
-  let { error } = await executar(payload);
-  if (error) { // coluna "nivel" pode ainda não existir no banco: tenta salvar sem ela
-    const { nivel, ...semNivel } = payload;
-    ({ error } = await executar(semNivel));
+  const tentativas = [payload, semApelidos, semNivelEApelidos];
+  for (let i = 0; i < tentativas.length; i++) {
+    const { error } = await executar(tentativas[i]);
+    if (!error) return i === 0 ? "completo" : "parcial";
+    console.error(error);
   }
+  return "erro";
+}
+// Sugestões de exercícios para cadastrar (enviadas pelos treinos) e sugestões ignoradas: ver biblioteca_apelidos_sugestoes.sql
+async function fetchSugestoesExercicios() {
+  const { data, error } = await supabase.from("sugestoes_exercicios").select("*");
+  if (error) { console.error(error); return null; }
+  return data || [];
+}
+async function salvarSugestoesExercicios(itens) {
+  const linhas = itens
+    .map((i) => ({ chave: limparNome(i.nome), nome: String(i.nome).trim(), status: i.status || "pendente", origem: i.origem || "treino" }))
+    .filter((l) => l.chave);
+  if (linhas.length === 0) return true;
+  const { error } = await supabase.from("sugestoes_exercicios").upsert(linhas, { onConflict: "chave" });
   if (error) console.error(error);
+  return !error;
+}
+async function removerSugestaoExercicio(chave) {
+  const { error } = await supabase.from("sugestoes_exercicios").delete().eq("chave", chave);
+  if (error) console.error(error);
+  return !error;
 }
 // Troca o nome de um exercício em todas as programações (todas as pastas) e nos registros "treino executado"
 async function renomearExercicioNasProgramacoes(antigo, novo) {
@@ -486,6 +511,54 @@ function construirMapaObjetivos(programacoes) {
   return mapa;
 }
 
+/* ---------- nomes parecidos (apelidos) e reconhecimento de exercícios ---------- */
+const apelidosDe = (ex) => String(ex.apelidos || "").split(/[,;\n]/).map((a) => a.trim()).filter(Boolean);
+const variantesDe = (ex) => [ex.nome, ...apelidosDe(ex)];
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+const simToken = (a, b) => 1 - levenshtein(a, b) / Math.max(a.length, b.length);
+// 0 a 1: quanto dois nomes de exercício parecem ser a mesma coisa (palavra a palavra, tolera erros de escrita)
+function similaridadeNomes(a, b) {
+  const ta = limparNome(a).split(" ").filter(Boolean);
+  const tb = limparNome(b).split(" ").filter(Boolean);
+  if (!ta.length || !tb.length) return 0;
+  const dir = (x, y) => x.reduce((soma, t) => soma + Math.max(...y.map((u) => simToken(t, u))), 0) / x.length;
+  return Math.min(dir(ta, tb), dir(tb, ta));
+}
+function similaresNaBiblioteca(nome, biblioteca, limite = 2) {
+  return biblioteca
+    .map((ex) => ({ ex, s: Math.max(...variantesDe(ex).map((v) => similaridadeNomes(nome, v))) }))
+    .filter((x) => x.s >= 0.7 && limparNome(x.ex.nome) !== limparNome(nome))
+    .sort((x, y) => y.s - x.s)
+    .slice(0, limite)
+    .map((x) => x.ex);
+}
+// Lista de todos os nomes (e apelidos) da biblioteca, do maior para o menor, apontando para o nome principal
+function indiceBiblioteca(biblioteca) {
+  const lista = [];
+  biblioteca.forEach((b) => variantesDe(b).forEach((v) => {
+    const n = limparNome(v);
+    if (n) lista.push({ nome: b.nome, n });
+  }));
+  return lista.sort((a, b) => b.n.length - a.n.length);
+}
+// aceita singular/plural ("squat" e "squats") quando o nome tem 4+ letras
+const achaNoIndice = (indice, resto) =>
+  indice.find((x) => [x.n, ...(x.n.length >= 4 ? [`${x.n}s`, x.n.replace(/s$/, "")] : [])].some((v) => resto.includes(` ${v} `)));
+
 // Reconhece, no texto do treino, os exercícios que existem na biblioteca
 function extrairExerciciosDoTreino(w, biblioteca, mapaObjetivos) {
   const fontes = [
@@ -494,21 +567,43 @@ function extrairExerciciosDoTreino(w, biblioteca, mapaObjetivos) {
     { texto: w.skill, padrao: "Skill" },
     ...(w.blocos || []).map((b) => ({ texto: b.conteudo, padrao: "" })),
   ];
-  const nomes = biblioteca
-    .map((b) => ({ nome: b.nome, n: limparNome(b.nome) }))
-    .filter((x) => x.n)
-    .sort((a, b) => b.n.length - a.n.length); // nomes maiores primeiro
+  const indice = indiceBiblioteca(biblioteca);
   const vistos = new Set();
   const saida = [];
   fontes.forEach(({ texto, padrao }) => String(texto || "").split("\n").forEach((linha) => {
     const pre = (PREFIXO_QTD.exec(linha) || [""])[0];
     const resto = ` ${limparNome(linha.slice(pre.length))} `;
     if (resto.trim() === "") return;
-    // aceita singular/plural ("squat" e "squats") quando o nome tem 4+ letras
-    const achado = nomes.find((x) => [x.n, ...(x.n.length >= 4 ? [`${x.n}s`, x.n.replace(/s$/, "")] : [])].some((v) => resto.includes(` ${v} `)));
-    if (!achado || vistos.has(achado.n)) return;
-    vistos.add(achado.n);
-    saida.push({ nome: achado.nome, objetivo: padrao || mapaObjetivos[achado.n] || "" });
+    const achado = achaNoIndice(indice, resto);
+    const canon = achado ? limparNome(achado.nome) : "";
+    if (!achado || vistos.has(canon)) return;
+    vistos.add(canon);
+    saida.push({ nome: achado.nome, objetivo: padrao || mapaObjetivos[canon] || "" });
+  }));
+  return saida;
+}
+
+// Linhas do treino (que começam com quantidade) cujo exercício NÃO está na biblioteca: candidatos a cadastrar
+const PALAVRAS_NAO_EXERCICIO = ["round", "rounds", "time cap", "timecap", "emom", "amrap", "rest", "descanso", "intensidade", "objetivo", "objetivos", "carga", "pausa", "min", "seg", "serie", "series"];
+function limparCandidato(txt) {
+  return String(txt || "").replace(/\([^)]*\)/g, " ").replace(/[.,;:!]+$/g, "").replace(/\s+/g, " ").trim();
+}
+function candidatosForaDaBiblioteca(textos, biblioteca, excluirChaves = new Set()) {
+  const indice = indiceBiblioteca(biblioteca);
+  const vistos = new Set();
+  const saida = [];
+  textos.forEach((texto) => String(texto || "").split("\n").forEach((linha) => {
+    const pre = (PREFIXO_QTD.exec(linha) || [""])[0];
+    if (!pre.trim()) return; // só linhas que começam com quantidade ("40x", "200 M", "G1-")
+    const nome = limparCandidato(linha.slice(pre.length));
+    const chave = limparNome(nome);
+    if (nome.length < 3 || nome.length > 45 || /\d/.test(nome) || !chave) return;
+    if (chave.split(" ").length > 6) return;
+    if (PALAVRAS_NAO_EXERCICIO.some((pl) => ` ${chave} `.includes(` ${pl} `))) return;
+    if (achaNoIndice(indice, ` ${chave} `)) return; // já está na biblioteca (ou é um nome parecido cadastrado)
+    if (excluirChaves.has(chave) || vistos.has(chave)) return;
+    vistos.add(chave);
+    saida.push(nome);
   }));
   return saida;
 }
@@ -1195,22 +1290,32 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const [catAberto, setCatAberto] = useState(false); // janela de categorias
   const [edicaoCat, setEdicaoCat] = useState({}); // nomes digitados ao renomear categorias
   const [copiaEx, setCopiaEx] = useState(false); // formulário aberto a partir de "Duplicar"
+  const [sugestoes, setSugestoes] = useState([]); // sugestões vindas dos treinos / ignoradas (tabela sugestoes_exercicios)
+  const [verIgnoradas, setVerIgnoradas] = useState(false);
   const [pendenteOrigem, setPendenteOrigem] = useState(null); // nome original quando o cadastro vem da lista "A cadastrar"
   const [form, setForm] = useState({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
   const { pedir, Modal } = useSenhaGate(senha);
 
   useEffect(() => { (async () => setProgramacoes(await fetchProgramacoes()))(); }, []);
+  useEffect(() => { (async () => setSugestoes((await fetchSugestoesExercicios()) || []))(); }, []);
 
-  // Exercícios usados nas programações que ainda NÃO estão na biblioteca (somem da lista quando cadastrados)
-  const nomesNaBiblioteca = new Set(exercicios.map((e) => normalizarTexto(e.nome)));
+  // Exercícios usados nas programações (ou sugeridos nos treinos) que ainda NÃO estão na biblioteca.
+  // Nomes parecidos (apelidos) cadastrados contam como "já está na biblioteca". Somem da lista quando cadastrados ou ignorados.
+  const nomesNaBiblioteca = new Set(exercicios.flatMap((e) => variantesDe(e).map(limparNome)));
+  const ignoradasLista = sugestoes.filter((x) => x.status === "ignorada");
+  const ignoradasChaves = new Set(ignoradasLista.map((x) => x.chave));
   const pendentesMapa = {};
   programacoes.forEach((pr) => pr.dias.forEach((d) => exerciciosDoDia(d).forEach((e) => {
-    const k = normalizarTexto(e.nome);
-    if (!k || nomesNaBiblioteca.has(k)) return;
+    const k = limparNome(e.nome);
+    if (!k || nomesNaBiblioteca.has(k) || ignoradasChaves.has(k)) return;
     if (!pendentesMapa[k]) pendentesMapa[k] = { chave: k, nome: e.nome.trim(), n: 0, objetivo: "" };
     pendentesMapa[k].n++;
     if (e.objetivo) pendentesMapa[k].objetivo = e.objetivo;
   })));
+  sugestoes.filter((x) => x.status === "pendente").forEach((x) => {
+    if (!x.chave || nomesNaBiblioteca.has(x.chave)) return;
+    if (!pendentesMapa[x.chave]) pendentesMapa[x.chave] = { chave: x.chave, nome: x.nome, n: 0, objetivo: "" };
+  });
   const pendentes = Object.values(pendentesMapa).sort((x, y) => y.n - x.n || x.nome.localeCompare(y.nome, "pt-BR"));
 
   // Categorias em uso (com contagem). As sugeridas só aparecem enquanto a biblioteca ainda não tem nenhuma.
@@ -1220,6 +1325,13 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const categoriasExistentes = categoriasEmUso.length > 0
     ? categoriasEmUso
     : [...GRUPOS_SUGERIDOS].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const aliasAtuais = new Set(String(form.apelidos || "").split(/[,;\n]/).map(limparNome).filter(Boolean));
+  const sugestoesApelido = form.nome.trim().length >= 3
+    ? pendentes.filter((po) => po.chave !== limparNome(form.nome) && !aliasAtuais.has(po.chave) && similaridadeNomes(form.nome, po.nome) >= 0.7).slice(0, 4)
+    : [];
+  const parecidosNaBib = form.nome.trim().length >= 3
+    ? similaresNaBiblioteca(form.nome, exercicios.filter((e) => e.id !== editando), 3)
+    : [];
   const variacoesDoGrupo = Array.from(new Set(
     exercicios.filter((e) => e.grupoGrande === form.grupoGrande && e.grupoMenor).map((e) => e.grupoMenor)
   )).slice(0, 8);
@@ -1232,13 +1344,34 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
     setForm({ nome: "", nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
     setSheetAberto(true);
   });
-  const abrirNovoComNome = (nome) => pedir(() => {
+  const abrirNovoComNome = (nome, extra = {}) => pedir(() => {
     setEditando(null);
     setPendenteOrigem(nome);
     setCopiaEx(false);
     setNovaCategoria(false);
-    setForm({ nome, nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "" });
+    setForm({ nome, nivel: "", grupoGrande: "", grupoMenor: "", equipamento: "", descricao: "", link: "", apelidos: extra.apelidos || "" });
     setSheetAberto(true);
+  });
+
+  // "Mesmo que...": junta um nome pendente a um exercício já cadastrado (vira nome parecido dele)
+  const vincularApelido = (pn, ex) => pedir(async () => {
+    if (!window.confirm(`Vincular "${pn.nome}" como outro nome de "${ex.nome}"?\n\nOs dois passam a contar como o mesmo exercício (busca, sugestões nos treinos e gráficos).`)) return;
+    const novos = [...apelidosDe(ex), pn.nome.trim()];
+    const r = await salvarExercicioDb({ ...ex, apelidos: novos.join(", ") }, ex.id);
+    if (r !== "completo") window.alert("Para guardar nomes parecidos, rode o SQL biblioteca_apelidos_sugestoes.sql no Supabase.");
+    recarregar();
+  });
+  // Excluir uma sugestão que não serve: ela some da lista (dá para restaurar em "ignoradas")
+  const ignorarSugestao = (pn) => pedir(async () => {
+    const atual = sugestoes.find((x) => x.chave === pn.chave);
+    const ok = await salvarSugestoesExercicios([{ nome: pn.nome, status: "ignorada", origem: atual ? atual.origem : "programacao" }]);
+    if (!ok) { window.alert("Para excluir sugestões, rode o SQL biblioteca_apelidos_sugestoes.sql no Supabase."); return; }
+    setSugestoes((await fetchSugestoesExercicios()) || []);
+  });
+  const restaurarSugestao = (x) => pedir(async () => {
+    if (x.origem === "treino") await salvarSugestoesExercicios([{ nome: x.nome, status: "pendente", origem: "treino" }]);
+    else await removerSugestaoExercicio(x.chave);
+    setSugestoes((await fetchSugestoesExercicios()) || []);
   });
   const abrirEdicao = (ex) => pedir(() => { setEditando(ex.id); setPendenteOrigem(null); setCopiaEx(false); setNovaCategoria(false); setForm(ex); setSheetAberto(true); });
   // Duplicar: abre o formulário já preenchido como um exercício NOVO (só é criado quando você salvar)
@@ -1278,7 +1411,10 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
       );
     }
     setSalvando(true);
-    await salvarExercicioDb(form, editando);
+    const resultadoSalvar = await salvarExercicioDb(form, editando);
+    if (resultadoSalvar === "parcial" && (form.apelidos || "").trim()) {
+      window.alert("Salvei o exercício, mas os nomes parecidos não: rode o SQL biblioteca_apelidos_sugestoes.sql no Supabase.");
+    }
     if (trocarNasProgramacoes) await renomearExercicioNasProgramacoes(pendenteOrigem, form.nome.trim());
     setProgramacoes(await fetchProgramacoes());
     setSalvando(false);
@@ -1296,7 +1432,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
     recarregar();
   });
 
-  const textoBuscavelEx = (e) => [e.nome, e.nivel, e.grupoGrande, e.grupoMenor, e.equipamento, e.descricao]
+  const textoBuscavelEx = (e) => [e.nome, e.apelidos, e.nivel, e.grupoGrande, e.grupoMenor, e.equipamento, e.descricao]
     .filter(Boolean).join(" ").toLowerCase();
   const passaNivel = (e) => !filtroNivel || (filtroNivel === "__sem__" ? !e.nivel : e.nivel === filtroNivel);
   const filtrados = exercicios.filter((e) => passaNivel(e) && textoBuscavelEx(e).includes(busca.trim().toLowerCase()));
@@ -1321,7 +1457,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
         </button>
       </div>
 
-      {pendentes.length > 0 && (
+      {(pendentes.length > 0 || ignoradasLista.length > 0) && (
         <div style={{ background: "#1C1D20", border: "1px solid rgba(255,138,61,0.4)", borderRadius: 10, marginBottom: 12, overflow: "hidden" }}>
           <button
             onClick={() => setMostrarPend(!mostrarPend)}
@@ -1333,19 +1469,58 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
           {mostrarPend && (
             <div style={{ padding: "0 14px 12px", borderTop: "1px solid #2E2F34" }}>
               <div style={{ fontSize: 11.5, color: "#71727A", margin: "10px 0 2px", lineHeight: 1.4 }}>
-                Exercícios usados nas programações que ainda não estão na biblioteca. Ao cadastrar, eles saem desta lista sozinhos.
+                Exercícios das programações e dos treinos que ainda não estão na biblioteca. Ao cadastrar, saem da lista sozinhos. Use o <b>×</b> para excluir uma sugestão que não serve.
               </div>
-              {pendentes.map((pn) => (
-                <div key={pn.chave} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{pn.nome}</div>
-                    <div style={{ fontSize: 11, color: "#71727A" }}>usado {pn.n}×{pn.objetivo ? ` · ${pn.objetivo}` : ""}</div>
+              {pendentes.length === 0 && <div style={{ fontSize: 12.5, color: "#9A9A94", marginTop: 10 }}>Nenhuma sugestão pendente.</div>}
+              {pendentes.map((pn) => {
+                const simBib = similaresNaBiblioteca(pn.nome, exercicios, 2);
+                const simPend = pendentes.filter((po) => po.chave !== pn.chave && similaridadeNomes(pn.nome, po.nome) >= 0.7).slice(0, 2);
+                const chipSim = { cursor: "pointer", borderRadius: 999, padding: "5px 10px", fontSize: 11.5, fontWeight: 700, background: "rgba(228,222,0,0.08)", color: "#E4DE00", border: "1px solid rgba(228,222,0,0.4)" };
+                return (
+                  <div key={pn.chave} style={{ marginTop: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{pn.nome}</div>
+                        <div style={{ fontSize: 11, color: "#71727A" }}>{pn.n > 0 ? `usado ${pn.n}×` : "sugerido nos treinos"}{pn.objetivo ? ` · ${pn.objetivo}` : ""}</div>
+                      </div>
+                      <GhostButton onClick={() => abrirNovoComNome(pn.nome)} style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }}>
+                        <Plus size={13} /> Cadastrar
+                      </GhostButton>
+                      <button
+                        onClick={() => ignorarSugestao(pn)}
+                        title="Excluir esta sugestão"
+                        style={{ background: "none", border: "1px solid #3A3B40", borderRadius: 8, padding: 7, cursor: "pointer", display: "flex", flexShrink: 0 }}
+                      >
+                        <X size={15} color="#9A9A94" />
+                      </button>
+                    </div>
+                    {(simBib.length > 0 || simPend.length > 0) && (
+                      <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: "#71727A" }}>É o mesmo que:</span>
+                        {simBib.map((ex) => (
+                          <button key={ex.id} onClick={() => vincularApelido(pn, ex)} style={chipSim}>{ex.nome}</button>
+                        ))}
+                        {simPend.map((po) => (
+                          <button key={po.chave} onClick={() => abrirNovoComNome(pn.nome, { apelidos: po.nome })} style={chipSim} title="Cadastra este exercício já com o outro nome como nome parecido">{po.nome}</button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <GhostButton onClick={() => abrirNovoComNome(pn.nome)} style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }}>
-                    <Plus size={13} /> Cadastrar
-                  </GhostButton>
+                );
+              })}
+              {ignoradasLista.length > 0 && (
+                <div style={{ marginTop: 14, borderTop: "1px solid #2E2F34", paddingTop: 10 }}>
+                  <button onClick={() => setVerIgnoradas(!verIgnoradas)} style={{ background: "none", border: "none", color: "#9A9A94", fontSize: 12, textDecoration: "underline", cursor: "pointer", padding: 0 }}>
+                    {verIgnoradas ? "Esconder ignoradas" : `Sugestões excluídas (${ignoradasLista.length})`}
+                  </button>
+                  {verIgnoradas && ignoradasLista.map((x) => (
+                    <div key={x.chave} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: 12.5, color: "#9A9A94" }}>{x.nome}</span>
+                      <button onClick={() => restaurarSugestao(x)} style={{ background: "none", border: "none", color: "#E4DE00", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>restaurar</button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>
@@ -1404,6 +1579,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
                         </div>
                       )}
                       {ex.equipamento && <div style={{ fontSize: 12, color: "#9A9A94" }}>Equip: {ex.equipamento}</div>}
+                      {apelidosDe(ex).length > 0 && <div style={{ fontSize: 12, color: "#9A9A94", marginTop: 3 }}>Também chamado: {apelidosDe(ex).join(", ")}</div>}
                       {ex.descricao && <div style={{ fontSize: 12.5, color: "#B9BABF", marginTop: 6, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{ex.descricao}</div>}
                       {!ex.descricao && !ex.equipamento && !ex.grupoMenor && !ex.nivel && !ex.link && (
                         <div style={{ fontSize: 12, color: "#5f6066" }}>Sem descrição ainda.</div>
@@ -1468,6 +1644,28 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
           )}
           <Field label="Nome do exercício">
             <TextInput value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex: Snatch" />
+          </Field>
+          <Field label="Nomes parecidos (mesmo exercício)">
+            <TextInput value={form.apelidos || ""} onChange={(e) => setForm({ ...form, apelidos: e.target.value })} placeholder="Ex: Agachamento livre, Bodyweight squat" />
+            <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 6, lineHeight: 1.4 }}>
+              Outros nomes para o MESMO exercício (separe por vírgula). Na busca, nas sugestões dos treinos e nos gráficos, todos contam como este.
+            </div>
+            {sugestoesApelido.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: "#71727A" }}>Pendentes parecidos:</span>
+                {sugestoesApelido.map((po) => (
+                  <button key={po.chave} type="button" onClick={() => setForm({ ...form, apelidos: [...apelidosDe(form), po.nome].join(", ") })}
+                    style={{ cursor: "pointer", borderRadius: 999, padding: "5px 11px", fontSize: 12, fontWeight: 700, background: "rgba(228,222,0,0.08)", color: "#E4DE00", border: "1px solid rgba(228,222,0,0.4)" }}>
+                    + {po.nome}
+                  </button>
+                ))}
+              </div>
+            )}
+            {parecidosNaBib.length > 0 && !editando && (
+              <div style={{ fontSize: 11.5, color: "#FF8A3D", marginTop: 8, lineHeight: 1.4 }}>
+                Já existe algo parecido na biblioteca: {parecidosNaBib.map((x) => x.nome).join(", ")}. Se for o mesmo exercício, edite aquele e use "Nomes parecidos" em vez de cadastrar de novo.
+              </div>
+            )}
           </Field>
           <Field label="Nível (categoria mãe)">
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1624,7 +1822,7 @@ function interpretarTextoTreino(textoBruto) {
 }
 
 // Campo de texto que sugere exercícios da biblioteca enquanto você digita a linha atual
-function TextoComSugestao({ value, onChange, biblioteca = [], ...resto }) {
+function TextoComSugestao({ value, onChange, biblioteca = [], onSugerir, ...resto }) {
   const [caret, setCaret] = useState(0);
   const [focado, setFocado] = useState(false);
   const alvo = useRef(null);
@@ -1636,16 +1834,20 @@ function TextoComSugestao({ value, onChange, biblioteca = [], ...resto }) {
   const linha = texto.slice(ini, fim);
   const prefixo = (PREFIXO_QTD.exec(linha) || [""])[0];
   const consulta = limparNome(linha.slice(prefixo.length));
+  const nomeNovo = limparCandidato(linha.slice(prefixo.length));
 
   let sugestoes = [];
+  let podeSugerir = false;
   if (focado && consulta.length >= 2 && biblioteca.length > 0) {
-    const cand = biblioteca.map((b) => ({ b, n: limparNome(b.nome) })).filter((x) => x.n);
-    if (!cand.some((x) => x.n === consulta)) {
+    // procura no nome e nos nomes parecidos (apelidos) de cada exercício
+    const cand = biblioteca.map((b) => ({ b, ns: variantesDe(b).map(limparNome).filter(Boolean) })).filter((x) => x.ns.length);
+    if (!cand.some((x) => x.ns.includes(consulta))) {
       sugestoes = cand
-        .filter((x) => x.n.includes(consulta))
-        .sort((x, y) => (x.n.startsWith(consulta) ? 0 : 1) - (y.n.startsWith(consulta) ? 0 : 1) || x.n.length - y.n.length)
+        .filter((x) => x.ns.some((n) => n.includes(consulta)))
+        .sort((x, y) => (x.ns.some((n) => n.startsWith(consulta)) ? 0 : 1) - (y.ns.some((n) => n.startsWith(consulta)) ? 0 : 1) || x.b.nome.length - y.b.nome.length)
         .slice(0, 5)
         .map((x) => x.b);
+      podeSugerir = !!onSugerir && consulta.length >= 4 && nomeNovo.length >= 3;
     }
   }
 
@@ -1673,7 +1875,7 @@ function TextoComSugestao({ value, onChange, biblioteca = [], ...resto }) {
         onFocus={(e) => { setFocado(true); rastrear(e); }}
         onBlur={() => setTimeout(() => setFocado(false), 180)}
       />
-      {sugestoes.length > 0 && (
+      {(sugestoes.length > 0 || podeSugerir) && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, overflowX: "auto", marginTop: 6, paddingBottom: 2 }}>
           <Sparkles size={14} color="#E4DE00" style={{ flexShrink: 0 }} />
           {sugestoes.map((b) => (
@@ -1690,9 +1892,56 @@ function TextoComSugestao({ value, onChange, biblioteca = [], ...resto }) {
               {b.nome}
             </button>
           ))}
+          {podeSugerir && (
+            <button
+              type="button"
+              title={`Enviar "${nomeNovo}" para a lista "A cadastrar" da Biblioteca`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSugerir(nomeNovo)}
+              style={{
+                flexShrink: 0, whiteSpace: "nowrap", cursor: "pointer", borderRadius: 999, padding: "6px 12px",
+                background: "none", color: "#FF8A3D", border: "1px dashed rgba(255,138,61,0.6)", fontSize: 12.5, fontWeight: 700,
+              }}
+            >
+              + à biblioteca
+            </button>
+          )}
         </div>
       )}
     </>
+  );
+}
+
+// Janela: exercícios do treino que não estão na biblioteca -> enviar para a lista "A cadastrar"
+function ForaDaBibliotecaSheet({ candidatos, onEnviar, onFechar }) {
+  const [marcados, setMarcados] = useState({});
+  const [enviando, setEnviando] = useState(false);
+  const escolhidos = candidatos.filter((n) => marcados[n] !== false);
+  const enviar = async () => {
+    if (enviando || escolhidos.length === 0) return;
+    setEnviando(true);
+    const ok = await onEnviar(escolhidos);
+    setEnviando(false);
+    if (ok) onFechar();
+  };
+  return (
+    <Sheet title="Fora da biblioteca" onClose={onFechar}>
+      <div style={{ fontSize: 12.5, color: "#9A9A94", marginBottom: 12, lineHeight: 1.45 }}>
+        Estes exercícios do treino não estão na biblioteca. Marque os que quer enviar para a lista "A cadastrar" (na Biblioteca).
+      </div>
+      {candidatos.map((n) => (
+        <label key={n} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 8, marginBottom: 6, cursor: "pointer" }}>
+          <input type="checkbox" checked={marcados[n] !== false} onChange={(e) => setMarcados({ ...marcados, [n]: e.target.checked })} style={{ width: 18, height: 18, flexShrink: 0 }} />
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{n}</span>
+        </label>
+      ))}
+      <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+        <GhostButton onClick={onFechar} style={{ flex: 1 }}>Cancelar</GhostButton>
+        <PrimaryButton onClick={enviar} disabled={enviando || escolhidos.length === 0} style={{ flex: 1.4 }}>
+          <Check size={16} /> {enviando ? "Enviando..." : `Enviar ${escolhidos.length}`}
+        </PrimaryButton>
+      </div>
+    </Sheet>
   );
 }
 
@@ -1825,12 +2074,13 @@ function ExecutarTreinoSheet({ w, programacoes, biblioteca, salvando, onFechar, 
   );
 }
 
-function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, protocolos = [], biblioteca = [] }) {
+function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, protocolos = [], biblioteca = [], sugestoesEx = [], onSugerirExercicios }) {
   const [form, setForm] = useState(inicial || {
     nome: "", data: new Date().toISOString().slice(0, 10), categoria: "", protocoloId: "", tags: "",
     warmupGeral: "", warmupEspecifico: "", skill: "", blocos: [blocoVazio()],
   });
   const [textoColado, setTextoColado] = useState("");
+  const [revisarAberto, setRevisarAberto] = useState(false);
   const [colarAberto, setColarAberto] = useState(false);
   const [avisoDistribuicao, setAvisoDistribuicao] = useState("");
 
@@ -1913,13 +2163,13 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, p
       </Field>
 
       <Field label="G-WARM UP (geral)">
-        <TextoComSugestao biblioteca={biblioteca} value={form.warmupGeral} onChange={(e) => setForm({ ...form, warmupGeral: e.target.value })} placeholder="Aquecimento geral..." />
+        <TextoComSugestao biblioteca={biblioteca} onSugerir={onSugerirExercicios ? (nome) => onSugerirExercicios([nome]) : undefined} value={form.warmupGeral} onChange={(e) => setForm({ ...form, warmupGeral: e.target.value })} placeholder="Aquecimento geral..." />
       </Field>
       <Field label="E-WARM UP (específico)">
-        <TextoComSugestao biblioteca={biblioteca} value={form.warmupEspecifico} onChange={(e) => setForm({ ...form, warmupEspecifico: e.target.value })} placeholder="Aquecimento específico do movimento..." />
+        <TextoComSugestao biblioteca={biblioteca} onSugerir={onSugerirExercicios ? (nome) => onSugerirExercicios([nome]) : undefined} value={form.warmupEspecifico} onChange={(e) => setForm({ ...form, warmupEspecifico: e.target.value })} placeholder="Aquecimento específico do movimento..." />
       </Field>
       <Field label="Skill">
-        <TextoComSugestao biblioteca={biblioteca} value={form.skill} onChange={(e) => setForm({ ...form, skill: e.target.value })} placeholder="Trabalho de habilidade/técnica..." />
+        <TextoComSugestao biblioteca={biblioteca} onSugerir={onSugerirExercicios ? (nome) => onSugerirExercicios([nome]) : undefined} value={form.skill} onChange={(e) => setForm({ ...form, skill: e.target.value })} placeholder="Trabalho de habilidade/técnica..." />
       </Field>
 
       <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 14, color: "#F1EFE9", textTransform: "uppercase", margin: "18px 0 8px", letterSpacing: "0.04em" }}>
@@ -1978,7 +2228,7 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, p
             <AutoTextArea value={b.objetivos} onChange={(e) => atualizarBloco(b.id, "objetivos", e.target.value)} placeholder="O que esse bloco desenvolve..." />
           </Field>
           <Field label="Conteúdo (movimentos, reps, tempo)">
-            <TextoComSugestao biblioteca={biblioteca} value={b.conteudo} onChange={(e) => atualizarBloco(b.id, "conteudo", e.target.value)} placeholder={"Ex: 21-15-9\nThrusters\nPull-ups"} style={{ minHeight: 160 }} />
+            <TextoComSugestao biblioteca={biblioteca} onSugerir={onSugerirExercicios ? (nome) => onSugerirExercicios([nome]) : undefined} value={b.conteudo} onChange={(e) => atualizarBloco(b.id, "conteudo", e.target.value)} placeholder={"Ex: 21-15-9\nThrusters\nPull-ups"} style={{ minHeight: 160 }} />
           </Field>
           <Field label="Resultado (opcional)">
             <AutoTextArea
@@ -1997,6 +2247,25 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, p
       ))}
 
       <GhostButton onClick={addBloco} style={{ width: "100%", marginBottom: 16 }}><Plus size={15} /> Adicionar workout / bloco</GhostButton>
+
+      {(() => {
+        const jaSugeridas = new Set(sugestoesEx.map((x) => x.chave)); // pendentes e ignoradas
+        const candidatos = biblioteca.length > 0 && onSugerirExercicios
+          ? candidatosForaDaBiblioteca([form.warmupGeral, form.warmupEspecifico, form.skill, ...form.blocos.map((b) => b.conteudo)], biblioteca, jaSugeridas)
+          : [];
+        return (
+          <>
+            {candidatos.length > 0 && (
+              <GhostButton onClick={() => setRevisarAberto(true)} style={{ width: "100%", marginBottom: 12, color: "#FF8A3D", borderColor: "rgba(255,138,61,0.5)" }}>
+                <AlertCircle size={15} /> {candidatos.length} exercício{candidatos.length > 1 ? "s" : ""} fora da biblioteca: revisar
+              </GhostButton>
+            )}
+            {revisarAberto && (
+              <ForaDaBibliotecaSheet candidatos={candidatos} onEnviar={onSugerirExercicios} onFechar={() => setRevisarAberto(false)} />
+            )}
+          </>
+        );
+      })()}
 
       <div style={{ display: "flex", gap: 10 }}>
         <GhostButton onClick={onCancelar} style={{ flex: 1 }}>Cancelar</GhostButton>
@@ -2531,6 +2800,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   const [editando, setEditando] = useState(null);
   const [copiaInicial, setCopiaInicial] = useState(null); // treino duplicado, ainda não salvo
   const [biblioteca, setBiblioteca] = useState([]); // para sugerir exercícios e reconhecer o treino executado
+  const [sugestoesEx, setSugestoesEx] = useState([]); // sugestões de exercícios a cadastrar (e ignoradas)
   const [programacoesExec, setProgramacoesExec] = useState([]);
   const [resultadoSheet, setResultadoSheet] = useState(null); // { w, edit } enquanto a janela de resultado está aberta
   const [salvandoRes, setSalvandoRes] = useState(false);
@@ -2560,6 +2830,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     (async () => {
       setBiblioteca(await fetchExercicios());
       setProgramacoesExec(await fetchProgramacoes());
+      setSugestoesEx((await fetchSugestoesExercicios()) || []);
     })();
   }, []);
 
@@ -2574,6 +2845,17 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       (execucoesPorTreino[t.id] = execucoesPorTreino[t.id] || []).push({ data: formatarDiaMes(dt), pasta: pastaDe(pr), progId: pr.id, diaChave: d.dia });
     }));
   });
+
+  // Envia exercícios do treino que não estão na biblioteca para a lista "A cadastrar"
+  const sugerirExercicios = async (nomes) => {
+    const novos = nomes.map((n) => String(n).trim()).filter(Boolean);
+    if (novos.length === 0) return false;
+    const ok = await salvarSugestoesExercicios(novos.map((nome) => ({ nome, status: "pendente", origem: "treino" })));
+    if (!ok) { if (onToast) onToast("Não foi possível enviar: rode o SQL das sugestões (biblioteca_apelidos_sugestoes.sql)"); return false; }
+    setSugestoesEx((await fetchSugestoesExercicios()) || []);
+    if (onToast) onToast(`${novos.length} exercício${novos.length > 1 ? "s" : ""} enviado${novos.length > 1 ? "s" : ""} para "A cadastrar" na Biblioteca`);
+    return true;
+  };
 
   // "Treino executado": abre a janela (escolhe a pasta, revisa os exercícios) e só então lança na programação
   const abrirExecucao = (w) => pedir(async () => {
@@ -3072,6 +3354,8 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
             salvando={salvandoTreino}
             protocolos={protocolos}
             biblioteca={biblioteca}
+            sugestoesEx={sugestoesEx}
+            onSugerirExercicios={sugerirExercicios}
           />
         </Sheet>
       )}
@@ -3728,8 +4012,8 @@ function ObjetivoSelect({ valor, onChange }) {
 function AdicionarExercicio({ biblioteca, onAdd }) {
   const [texto, setTexto] = useState("");
   const termo = texto.trim().toLowerCase();
-  const sugestoes = termo ? biblioteca.filter((e) => (e.nome || "").toLowerCase().includes(termo)).slice(0, 6) : [];
-  const exato = biblioteca.some((e) => (e.nome || "").trim().toLowerCase() === termo);
+  const sugestoes = termo ? biblioteca.filter((e) => variantesDe(e).some((v) => v.toLowerCase().includes(termo))).slice(0, 6) : [];
+  const exato = biblioteca.some((e) => variantesDe(e).some((v) => v.trim().toLowerCase() === termo));
   const adicionar = (nome) => {
     const n = (nome || "").trim();
     if (!n) return;
@@ -4032,7 +4316,10 @@ function GraficoRanking({ titulo, ajuda, eventos }) {
 }
 
 // Os dois gráficos: exercícios mais usados e aptidão mais trabalhada
-function GraficosProgramacao({ programacoes }) {
+function GraficosProgramacao({ programacoes, biblioteca = [] }) {
+  // nomes parecidos (apelidos) contam como o exercício principal
+  const canon = {};
+  biblioteca.forEach((b) => variantesDe(b).forEach((v) => { const k = limparNome(v); if (k) canon[k] = b.nome; }));
   const evExercicios = [];
   const evAptidoes = [];
   programacoes.forEach((p) => {
@@ -4040,7 +4327,7 @@ function GraficosProgramacao({ programacoes }) {
     if (!ref) return;
     const mes = `${ref.getFullYear()}-${pad2(ref.getMonth() + 1)}`;
     p.dias.forEach((d) => exerciciosDoDia(d).forEach((e) => {
-      if ((e.nome || "").trim()) evExercicios.push({ mes, rotulo: e.nome.trim() });
+      if ((e.nome || "").trim()) evExercicios.push({ mes, rotulo: canon[limparNome(e.nome)] || e.nome.trim() });
       if ((e.objetivo || "").trim()) evAptidoes.push({ mes, rotulo: e.objetivo.trim() });
     }));
   });
@@ -4488,7 +4775,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
             </div>
           )}
           {atuais.map(renderCard)}
-          <GraficosProgramacao programacoes={daPasta} />
+          <GraficosProgramacao programacoes={daPasta} biblioteca={biblioteca} />
 
           {passadas.length > 0 && (
             <div style={{ marginTop: 18 }}>
