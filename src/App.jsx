@@ -17,7 +17,9 @@ import { supabase } from "./supabaseClient.js";
 --------------------------------------------------------- */
 
 const FONT_IMPORT = `
-@import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+[style*="Outfit"]{font-weight:700;letter-spacing:0.01em !important;}
+body{-webkit-font-smoothing:antialiased;}
 `;
 
 const NIVEIS = [
@@ -197,7 +199,7 @@ const dataRefProgramacao = (p) => parseDataLocal(p.semanaInicio) || parseDataLoc
 const botaoValidar = (ativo, cor) => ({
   width: 32, height: 32, flexShrink: 0, borderRadius: 8, cursor: "pointer",
   display: "flex", alignItems: "center", justifyContent: "center",
-  background: ativo ? cor : "transparent", color: ativo ? "#0A0A0A" : "#71727A",
+  background: ativo ? cor : "transparent", color: ativo ? "#0A0A0A" : "#8E8F96",
   border: `1.5px solid ${ativo ? cor : "#3A3B40"}`,
 });
 
@@ -963,7 +965,7 @@ function Section({ title, icon, children, right }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {icon}
-          <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, letterSpacing: "0.05em", color: "#F1EFE9", textTransform: "uppercase" }}>
+          <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 15, letterSpacing: "0.05em", color: "#F1EFE9", textTransform: "uppercase" }}>
             {title}
           </span>
         </div>
@@ -1119,7 +1121,7 @@ function Sheet({ title, onClose, children }) {
           position: "sticky", top: 0, zIndex: 2, background: "#212226",
           display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 0 14px",
         }}>
-          <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.04em" }}>{title}</span>
+          <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.04em" }}>{title}</span>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#9A9A94", cursor: "pointer" }}><X size={22} /></button>
         </div>
         {children}
@@ -1129,7 +1131,7 @@ function Sheet({ title, onClose, children }) {
 }
 
 function EmptyState({ text }) {
-  return <div style={{ border: "1px dashed #3A3B40", borderRadius: 10, padding: "24px 16px", textAlign: "center", color: "#71727A", fontSize: 13 }}>{text}</div>;
+  return <div style={{ border: "1px dashed #3A3B40", borderRadius: 10, padding: "24px 16px", textAlign: "center", color: "#8E8F96", fontSize: 13 }}>{text}</div>;
 }
 function Toast({ text }) {
   if (!text) return null;
@@ -1144,7 +1146,7 @@ function Toast({ text }) {
   );
 }
 function Spinner({ label = "Carregando..." }) {
-  return <div style={{ color: "#71727A", textAlign: "center", padding: 30, fontSize: 13 }}>{label}</div>;
+  return <div style={{ color: "#8E8F96", textAlign: "center", padding: 30, fontSize: 13 }}>{label}</div>;
 }
 
 /* ---------------------------- proteção por senha (reutilizável) ---------------------------- */
@@ -1251,7 +1253,7 @@ function TrocarSenha({ senha, setSenha }) {
       <button
         onClick={abrir}
         title="Alterar senha"
-        style={{ background: "none", border: "none", color: "#71727A", cursor: "pointer", padding: 6, display: "flex", alignItems: "center" }}
+        style={{ background: "none", border: "none", color: "#8E8F96", cursor: "pointer", padding: 6, display: "flex", alignItems: "center" }}
       >
         <KeyRound size={18} />
       </button>
@@ -1285,6 +1287,8 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const [salvando, setSalvando] = useState(false);
   const [novaCategoria, setNovaCategoria] = useState(false);
   const [filtroNivel, setFiltroNivel] = useState(""); // "" = Todos
+  const [filtroCat, setFiltroCat] = useState(""); // categoria principal ("" = todas)
+  const [catsAbertas, setCatsAbertas] = useState({}); // categorias expandidas (alça suspensa)
   const [programacoes, setProgramacoes] = useState([]);
   const [mostrarPend, setMostrarPend] = useState(false);
   const [abertoId, setAbertoId] = useState(null); // exercício com a descrição "suspensa" aberta
@@ -1436,7 +1440,9 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   const textoBuscavelEx = (e) => [e.nome, e.apelidos, e.nivel, e.grupoGrande, e.grupoMenor, e.equipamento, e.descricao]
     .filter(Boolean).join(" ").toLowerCase();
   const passaNivel = (e) => !filtroNivel || (filtroNivel === "__sem__" ? !e.nivel : e.nivel === filtroNivel);
-  const filtrados = exercicios.filter((e) => passaNivel(e) && textoBuscavelEx(e).includes(busca.trim().toLowerCase()));
+  const passaCat = (e) => !filtroCat || (e.grupoGrande || "Sem grupo") === filtroCat;
+  const buscaAtiva = busca.trim().length > 0;
+  const filtrados = exercicios.filter((e) => passaNivel(e) && passaCat(e) && textoBuscavelEx(e).includes(busca.trim().toLowerCase()));
   const temSemNivel = exercicios.some((e) => !e.nivel);
   const opcoesFiltro = [
     { id: "", label: "Todos" },
@@ -1450,7 +1456,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <div style={{ position: "relative", flex: 1 }}>
-          <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
+          <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#8E8F96" }} />
           <TextInput placeholder="Buscar por nome, categoria, equipamento, descrição..." value={busca} onChange={(e) => setBusca(e.target.value)} style={{ paddingLeft: 32 }} />
         </div>
         <button onClick={abrirNovo} style={{ background: "#E4DE00", border: "none", borderRadius: 8, width: 42, color: "#0A0A0A", cursor: "pointer" }}>
@@ -1469,7 +1475,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
           </button>
           {mostrarPend && (
             <div style={{ padding: "0 14px 12px", borderTop: "1px solid #2E2F34" }}>
-              <div style={{ fontSize: 11.5, color: "#71727A", margin: "10px 0 2px", lineHeight: 1.4 }}>
+              <div style={{ fontSize: 11.5, color: "#8E8F96", margin: "10px 0 2px", lineHeight: 1.4 }}>
                 Exercícios das programações e dos treinos que ainda não estão na biblioteca. Ao cadastrar, saem da lista sozinhos. Use o <b>×</b> para excluir uma sugestão que não serve.
               </div>
               {pendentes.length === 0 && <div style={{ fontSize: 12.5, color: "#9A9A94", marginTop: 10 }}>Nenhuma sugestão pendente.</div>}
@@ -1482,7 +1488,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{pn.nome}</div>
-                        <div style={{ fontSize: 11, color: "#71727A" }}>{pn.n > 0 ? `usado ${pn.n}×` : "sugerido nos treinos"}{pn.objetivo ? ` · ${pn.objetivo}` : ""}</div>
+                        <div style={{ fontSize: 11, color: "#8E8F96" }}>{pn.n > 0 ? `usado ${pn.n}×` : "sugerido nos treinos"}{pn.objetivo ? ` · ${pn.objetivo}` : ""}</div>
                       </div>
                       <GhostButton onClick={() => abrirNovoComNome(pn.nome)} style={{ padding: "7px 12px", fontSize: 12.5, flexShrink: 0 }}>
                         <Plus size={13} /> Cadastrar
@@ -1497,7 +1503,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
                     </div>
                     {(simBib.length > 0 || simPend.length > 0) && (
                       <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                        <span style={{ fontSize: 11, color: "#71727A" }}>É o mesmo que:</span>
+                        <span style={{ fontSize: 11, color: "#8E8F96" }}>É o mesmo que:</span>
                         {simBib.map((ex) => (
                           <button key={ex.id} onClick={() => vincularApelido(pn, ex)} style={chipSim}>{ex.nome}</button>
                         ))}
@@ -1527,8 +1533,35 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
         </div>
       )}
 
-      {/* Botões de filtro por categoria mãe */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
+      {/* CATEGORIA = filtro principal */}
+      {(() => {
+        const cats = [...categoriasEmUso, ...(exercicios.some((e) => !e.grupoGrande) ? ["Sem grupo"] : [])];
+        const contar = (c) => exercicios.filter((e) => (e.grupoGrande || "Sem grupo") === c).length;
+        const chipCat = (ativo) => ({
+          flexShrink: 0, background: ativo ? "#E4DE00" : "#1C1D20", color: ativo ? "#0A0A0A" : "#D0D1D6",
+          border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}`, borderRadius: 999, padding: "8px 14px",
+          fontSize: 13.5, fontWeight: ativo ? 800 : 600, cursor: "pointer", whiteSpace: "nowrap",
+        });
+        return (
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, overflowX: "auto", paddingBottom: 2 }}>
+            <button onClick={() => setFiltroCat("")} style={chipCat(filtroCat === "")}>Todas</button>
+            {cats.map((c) => (
+              <button key={c} onClick={() => setFiltroCat(filtroCat === c ? "" : c)} style={chipCat(filtroCat === c)}>
+                {c} <span style={{ opacity: 0.65, fontWeight: 600 }}>{contar(c)}</span>
+              </button>
+            ))}
+            <button
+              onClick={() => setCatAberto(true)}
+              style={{ flexShrink: 0, background: "none", border: "1px dashed #3A3B40", borderRadius: 999, padding: "8px 14px", fontSize: 13, fontWeight: 600, color: "#A9AAB1", cursor: "pointer", whiteSpace: "nowrap" }}
+            >
+              ✎ Categorias
+            </button>
+          </div>
+        );
+      })()}
+      {/* Nível = filtro secundário */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14, overflowX: "auto" }}>
+        <span style={{ fontSize: 11.5, color: "#8E8F96", fontWeight: 700, flexShrink: 0 }}>Nível:</span>
         {opcoesFiltro.map((o) => {
           const ativo = filtroNivel === o.id;
           return (
@@ -1536,30 +1569,36 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
               key={o.id || "todos"}
               onClick={() => setFiltroNivel(o.id)}
               style={{
-                flexShrink: 0, background: ativo ? "#E4DE00" : "#1C1D20", color: ativo ? "#0A0A0A" : "#B9BABF",
-                border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}`, borderRadius: 999, padding: "7px 13px",
-                fontSize: 12.5, fontWeight: ativo ? 800 : 600, cursor: "pointer", whiteSpace: "nowrap",
+                flexShrink: 0, background: ativo ? "rgba(228,222,0,0.16)" : "none", color: ativo ? "#E4DE00" : "#A9AAB1",
+                border: `1px solid ${ativo ? "#E4DE00" : "#33343A"}`, borderRadius: 999, padding: "4px 11px",
+                fontSize: 12, fontWeight: ativo ? 800 : 600, cursor: "pointer", whiteSpace: "nowrap",
               }}
             >
               {o.label}
             </button>
           );
         })}
-        <button
-          onClick={() => setCatAberto(true)}
-          style={{ flexShrink: 0, background: "none", border: "1px dashed #3A3B40", borderRadius: 999, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, color: "#9A9A94", cursor: "pointer", whiteSpace: "nowrap" }}
-        >
-          ✎ Categorias
-        </button>
       </div>
 
       {Object.keys(grupos).length === 0 && (
         <EmptyState text={exercicios.length === 0 ? "Nenhum exercício ainda. Toque em + para adicionar o primeiro." : "Nenhum exercício encontrado neste filtro."} />
       )}
 
-      {Object.entries(grupos).map(([grupo, lista]) => (
-        <Section key={grupo} title={grupo} icon={<Layers size={16} color="#E4DE00" />}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {Object.entries(grupos).map(([grupo, lista]) => {
+        const aberta = catsAbertas[grupo] ?? (buscaAtiva || filtroCat === grupo);
+        return (
+        <div key={grupo} style={{ marginBottom: 12, background: "#1A1B1E", border: "1px solid #2A2B30", borderLeft: "3px solid #E4DE00", borderRadius: 12, overflow: "hidden" }}>
+          <button
+            onClick={() => setCatsAbertas({ ...catsAbertas, [grupo]: !aberta })}
+            style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer", padding: "14px 14px", textAlign: "left" }}
+          >
+            <Layers size={18} color="#E4DE00" />
+            <span style={{ flex: 1, minWidth: 0, fontFamily: "'Outfit', sans-serif", fontSize: 17, color: "#FFFFFF" }}>{grupo}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#0A0A0A", background: "#E4DE00", borderRadius: 999, padding: "2px 9px" }}>{lista.length}</span>
+            {aberta ? <ChevronUp size={20} color="#A9AAB1" /> : <ChevronDown size={20} color="#A9AAB1" />}
+          </button>
+          {aberta && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 10px 12px" }}>
             {lista.map((ex) => {
               const aberto = abertoId === ex.id;
               return (
@@ -1569,7 +1608,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
                     style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: "none", border: "none", cursor: "pointer", padding: "12px 14px", textAlign: "left" }}
                   >
                     <span style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>{ex.nome}</span>
-                    {aberto ? <ChevronUp size={16} color="#71727A" /> : <ChevronDown size={16} color="#71727A" />}
+                    {aberto ? <ChevronUp size={16} color="#8E8F96" /> : <ChevronDown size={16} color="#8E8F96" />}
                   </button>
                   {aberto && (
                     <div style={{ padding: "10px 14px 12px", borderTop: "1px solid #2E2F34" }}>
@@ -1605,22 +1644,24 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
               );
             })}
           </div>
-        </Section>
-      ))}
+          )}
+        </div>
+        );
+      })}
 
       {catAberto && (
         <Sheet title="Categorias" onClose={() => { setCatAberto(false); setEdicaoCat({}); }}>
           <div style={{ fontSize: 12.5, color: "#9A9A94", marginBottom: 14, lineHeight: 1.45 }}>
             Renomeie as categorias (grupo grande). Isso muda todos os exercícios do grupo. Se o novo nome já existir, os dois grupos se juntam.
           </div>
-          {categoriasEmUso.length === 0 && <div style={{ fontSize: 12.5, color: "#71727A" }}>Ainda não há categorias em uso.</div>}
+          {categoriasEmUso.length === 0 && <div style={{ fontSize: 12.5, color: "#8E8F96" }}>Ainda não há categorias em uso.</div>}
           {categoriasEmUso.map((c) => {
             const valor = edicaoCat[c] !== undefined ? edicaoCat[c] : c;
             const mudou = valor.trim() && valor.trim() !== c;
             return (
               <div key={c} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 10 }}>
                 <TextInput value={valor} onChange={(e) => setEdicaoCat({ ...edicaoCat, [c]: e.target.value })} />
-                <div style={{ fontSize: 11.5, color: "#71727A", margin: "6px 0 8px" }}>{contagemCat[c]} exercício{contagemCat[c] === 1 ? "" : "s"}</div>
+                <div style={{ fontSize: 11.5, color: "#8E8F96", margin: "6px 0 8px" }}>{contagemCat[c]} exercício{contagemCat[c] === 1 ? "" : "s"}</div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <PrimaryButton onClick={() => renomearCategoria(c)} disabled={!mudou} style={{ flex: 1, padding: "8px 10px", fontSize: 13 }}>Salvar nome</PrimaryButton>
                   <GhostButton onClick={() => removerCategoria(c)} style={{ flex: 1, padding: "8px 10px", fontSize: 13, color: "#E6483F", borderColor: "#E6483F55" }}><Trash2 size={13} /> Remover</GhostButton>
@@ -1648,12 +1689,12 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
           </Field>
           <Field label="Nomes parecidos (mesmo exercício)">
             <TextInput value={form.apelidos || ""} onChange={(e) => setForm({ ...form, apelidos: e.target.value })} placeholder="Ex: Agachamento livre, Bodyweight squat" />
-            <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 6, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 6, lineHeight: 1.4 }}>
               Outros nomes para o MESMO exercício (separe por vírgula). Na busca, nas sugestões dos treinos e nos gráficos, todos contam como este.
             </div>
             {sugestoesApelido.length > 0 && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: "#71727A" }}>Pendentes parecidos:</span>
+                <span style={{ fontSize: 11, color: "#8E8F96" }}>Pendentes parecidos:</span>
                 {sugestoesApelido.map((po) => (
                   <button key={po.chave} type="button" onClick={() => setForm({ ...form, apelidos: [...apelidosDe(form), po.nome].join(", ") })}
                     style={{ cursor: "pointer", borderRadius: 999, padding: "5px 11px", fontSize: 12, fontWeight: 700, background: "rgba(228,222,0,0.08)", color: "#E4DE00", border: "1px solid rgba(228,222,0,0.4)" }}>
@@ -1700,7 +1741,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
           </Field>
           <Field label="Variação (opcional)">
             <TextInput value={form.grupoMenor} onChange={(e) => setForm({ ...form, grupoMenor: e.target.value })} placeholder="Ex: Unilateral, Isométrico, Com kettlebell" />
-            <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 6, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 6, lineHeight: 1.4 }}>
               Serve para separar versões do mesmo tipo de exercício dentro do grupo (ex.: grupo "Agachamento" → variação "Unilateral").
             </div>
             {variacoesDoGrupo.length > 0 && (
@@ -2001,12 +2042,12 @@ function ExecutarTreinoSheet({ w, programacoes, biblioteca, salvando, onFechar, 
 
       {!pasta ? (
         <>
-          <div style={{ fontSize: 12.5, color: "#71727A", marginBottom: 10 }}>Em qual pasta da programação lançar este treino?</div>
+          <div style={{ fontSize: 12.5, color: "#8E8F96", marginBottom: 10 }}>Em qual pasta da programação lançar este treino?</div>
           {nomesPastas.map((nome) => (
             <button key={nome} onClick={() => escolherPasta(nome)} style={linhaPasta}>
               <Folder size={20} color="#E4DE00" />
-              <span style={{ flex: 1, fontFamily: "'Anton', sans-serif", fontSize: 15, color: "#FFFFFF", letterSpacing: "0.03em", textTransform: "uppercase" }}>{nome}</span>
-              <ChevronRight size={16} color="#71727A" />
+              <span style={{ flex: 1, fontFamily: "'Outfit', sans-serif", fontSize: 15, color: "#FFFFFF", letterSpacing: "0.03em", textTransform: "uppercase" }}>{nome}</span>
+              <ChevronRight size={16} color="#8E8F96" />
             </button>
           ))}
           <button onClick={criarPasta} style={{ ...linhaPasta, borderLeft: "1px dashed #3A3B40", border: "1px dashed #3A3B40", justifyContent: "center", color: "#9A9A94", fontSize: 13.5, fontWeight: 600 }}>
@@ -2020,10 +2061,10 @@ function ExecutarTreinoSheet({ w, programacoes, biblioteca, salvando, onFechar, 
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <Folder size={18} color="#E4DE00" />
-            <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", textTransform: "uppercase" }}>{pasta}</span>
+            <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", textTransform: "uppercase" }}>{pasta}</span>
           </div>
 
-          <div style={{ fontSize: 12, color: "#71727A", marginBottom: 6 }}>Dia da semana</div>
+          <div style={{ fontSize: 12, color: "#8E8F96", marginBottom: 6 }}>Dia da semana</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
             {DIAS_SEMANA.map((d) => (
               <button key={d} onClick={() => setDia(d)} style={chipDia(dia === d)}>{d}{d === hojeChave ? " · hoje" : ""}</button>
@@ -2036,7 +2077,7 @@ function ExecutarTreinoSheet({ w, programacoes, biblioteca, salvando, onFechar, 
             </div>
           )}
 
-          <div style={{ fontSize: 12, color: "#71727A", marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: "#8E8F96", marginBottom: 8 }}>
             Exercícios reconhecidos no treino. Ajuste o objetivo, tire o que não vale ou adicione outros:
           </div>
           {itens.length === 0 && (
@@ -2049,9 +2090,9 @@ function ExecutarTreinoSheet({ w, programacoes, biblioteca, salvando, onFechar, 
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{it.nome}</div>
-                  {jaNoDia.has(limparNome(it.nome)) && <div style={{ fontSize: 10.5, color: "#71727A", marginTop: 2 }}>já está neste dia · será ignorado</div>}
+                  {jaNoDia.has(limparNome(it.nome)) && <div style={{ fontSize: 10.5, color: "#8E8F96", marginTop: 2 }}>já está neste dia · será ignorado</div>}
                 </div>
-                <X size={17} color="#71727A" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => setItens(itens.filter((_, k) => k !== j))} />
+                <X size={17} color="#8E8F96" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => setItens(itens.filter((_, k) => k !== j))} />
               </div>
               <div style={{ marginTop: 6 }}>
                 <ObjetivoSelect valor={it.objetivo} onChange={(v) => setItens(itens.map((x, k) => (k === j ? { ...x, objetivo: v } : x)))} />
@@ -2128,7 +2169,7 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, p
         </button>
         {colarAberto && (
           <div style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderTop: "none", borderRadius: "0 0 8px 8px", padding: 12 }}>
-            <div style={{ fontSize: 11.5, color: "#71727A", marginBottom: 8, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 11.5, color: "#8E8F96", marginBottom: 8, lineHeight: 1.4 }}>
               Cole o treino em texto. Reconheço "G-WARM UP", "E-WARM UP", "SKILL", "WORKOUT" (com formato e time cap tipo "15' AMRAP"), "Objetivo:" e "Requisitos:". Os campos abaixo continuam editáveis pra corrigir ou completar na mão.
             </div>
             <AutoTextArea
@@ -2173,7 +2214,7 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, p
         <TextoComSugestao biblioteca={biblioteca} onSugerir={onSugerirExercicios ? (nome) => onSugerirExercicios([nome]) : undefined} value={form.skill} onChange={(e) => setForm({ ...form, skill: e.target.value })} placeholder="Trabalho de habilidade/técnica..." />
       </Field>
 
-      <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 14, color: "#F1EFE9", textTransform: "uppercase", margin: "18px 0 8px", letterSpacing: "0.04em" }}>
+      <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 14, color: "#F1EFE9", textTransform: "uppercase", margin: "18px 0 8px", letterSpacing: "0.04em" }}>
         Blocos do treino
       </div>
 
@@ -2181,7 +2222,7 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, p
         <div key={b.id} style={{ background: "#1C1D20", border: `1px solid ${corDoNivel(b.nivel)}55`, borderRadius: 10, padding: 12, marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: "#9A9A94" }}>WORKOUT {i + 1}</span>
-            {form.blocos.length > 1 && <Trash2 size={14} color="#71727A" style={{ cursor: "pointer" }} onClick={() => removerBloco(b.id)} />}
+            {form.blocos.length > 1 && <Trash2 size={14} color="#8E8F96" style={{ cursor: "pointer" }} onClick={() => removerBloco(b.id)} />}
           </div>
           <Field label="Título (opcional)">
             <TextInput value={b.titulo} onChange={(e) => atualizarBloco(b.id, "titulo", e.target.value)} placeholder='Ex: "Metcon do dia"' />
@@ -2191,7 +2232,7 @@ function WorkoutForm({ inicial, onSalvar, onCancelar, legendas = {}, salvando, p
               <Select value={b.nivel} onChange={(e) => atualizarBloco(b.id, "nivel", e.target.value)}>
                 {NIVEIS.map((n) => <option key={n.nome} value={n.nome}>{n.nome}</option>)}
               </Select>
-              {legendas[b.nivel] && <div style={{ fontSize: 11, color: "#71727A", marginTop: 5 }}>{legendas[b.nivel]}</div>}
+              {legendas[b.nivel] && <div style={{ fontSize: 11, color: "#8E8F96", marginTop: 5 }}>{legendas[b.nivel]}</div>}
             </Field>
             <Field label="Formato">
               <Select
@@ -2296,26 +2337,26 @@ function WorkoutDetalhes({ w, legendas = {} }) {
       )}
       {w.warmupGeral && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9A9A94", marginBottom: 4 }}>G — WARM UP</div>
-          <div style={{ fontSize: 13, color: "#D8D8D3", whiteSpace: "pre-wrap" }}>{w.warmupGeral}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#E4DE00", marginBottom: 4, letterSpacing: "0.04em" }}>G — WARM UP</div>
+          <div style={{ fontSize: 14.5, lineHeight: 1.6, color: "#E6E4DE", whiteSpace: "pre-wrap" }}>{w.warmupGeral}</div>
         </div>
       )}
       {w.warmupEspecifico && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9A9A94", marginBottom: 4 }}>E — WARM UP</div>
-          <div style={{ fontSize: 13, color: "#D8D8D3", whiteSpace: "pre-wrap" }}>{w.warmupEspecifico}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#E4DE00", marginBottom: 4, letterSpacing: "0.04em" }}>E — WARM UP</div>
+          <div style={{ fontSize: 14.5, lineHeight: 1.6, color: "#E6E4DE", whiteSpace: "pre-wrap" }}>{w.warmupEspecifico}</div>
         </div>
       )}
       {w.skill && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9A9A94", marginBottom: 4 }}>SKILL</div>
-          <div style={{ fontSize: 13, color: "#D8D8D3", whiteSpace: "pre-wrap" }}>{w.skill}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#E4DE00", marginBottom: 4, letterSpacing: "0.04em" }}>SKILL</div>
+          <div style={{ fontSize: 14.5, lineHeight: 1.6, color: "#E6E4DE", whiteSpace: "pre-wrap" }}>{w.skill}</div>
         </div>
       )}
       {w.blocos.map((b, i) => (
         <div key={b.id} style={{ marginTop: 16, borderLeft: `3px solid ${corDoNivel(b.nivel)}`, paddingLeft: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-            <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 13, color: "#F1EFE9", textTransform: "uppercase" }}>
+            <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 15, color: "#FFFFFF" }}>
               Workout {i + 1} {b.titulo && `— ${b.titulo}`}
             </span>
             <PontoNivel nome={b.nivel} cor={corDoNivel(b.nivel)} />
@@ -2325,7 +2366,7 @@ function WorkoutDetalhes({ w, legendas = {} }) {
           {legendas[b.nivel] && <div style={{ fontSize: 11.5, color: "#8C8D91", fontStyle: "italic", marginBottom: 6 }}>{legendas[b.nivel]}</div>}
           {b.requisitos && <div style={{ fontSize: 12.5, color: "#B9BABF", marginBottom: 4 }}><span style={{ color: "#9A9A94", fontWeight: 600 }}>Requisitos: </span>{b.requisitos}</div>}
           {b.objetivos && <div style={{ fontSize: 12.5, color: "#B9BABF", marginBottom: 4 }}><span style={{ color: "#9A9A94", fontWeight: 600 }}>Objetivos: </span>{b.objetivos}</div>}
-          {b.conteudo && <div style={{ fontSize: 13, color: "#F1EFE9", whiteSpace: "pre-wrap", marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>{b.conteudo}</div>}
+          {b.conteudo && <div style={{ fontSize: 15, lineHeight: 1.7, color: "#F4F2EC", whiteSpace: "pre-wrap", marginTop: 8, fontFamily: "'Inter', sans-serif" }}>{b.conteudo}</div>}
           {b.resultado && (
             <div style={{ marginTop: 10, background: "rgba(228,222,0,0.08)", border: "1px solid rgba(228,222,0,0.3)", borderRadius: 8, padding: "8px 10px" }}>
               <div style={{ fontSize: 10.5, fontWeight: 700, color: "#E4DE00", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>Resultado</div>
@@ -2441,13 +2482,29 @@ function ResultadoSheet({ w, inicial, salvando, onSalvar, onFechar }) {
   );
 }
 
+const ACRONIMOS_TREINO = new Set(["ct", "amrap", "hiit", "emom", "mmii", "mmss", "mmi", "ktb", "wod", "rx", "hyrox", "amr"]);
+// Títulos digitados todo em MAIÚSCULAS ficam em formato de título (mais fácil de ler)
+function tituloLegivel(t) {
+  const s = String(t || "").trim();
+  if (!s || s !== s.toUpperCase()) return s;
+  const peq = new Set(["de", "da", "do", "das", "dos", "e", "a", "o", "p/", "com", "em", "para", "no", "na"]);
+  return s.toLowerCase().split(" ").map((p, i) => {
+    if (ACRONIMOS_TREINO.has(p) || (/^[ivxlcdm]+$/.test(p) && p.length <= 4 && p.length > 1)) return p.toUpperCase();
+    if (i > 0 && peq.has(p)) return p;
+    return p.charAt(0).toUpperCase() + p.slice(1);
+  }).join(" ");
+}
+const dataBonita = (d) => (/^\d{4}-\d{2}-\d{2}/.test(String(d || "")) ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : d);
+
 function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExecutarHoje, onDesfazerExecucao, onFavoritar, onInserirResultado, onEditarResultado, onExcluirResultado, onCompartilharResultados, execucoes = [], expandido, onToggle, legendas, destaque, senha, protocolo }) {
   const tags = (w.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
+  const corPrim = w.blocos && w.blocos[0] && w.blocos[0].nivel ? corDoNivel(w.blocos[0].nivel) : "#3A3B40";
   return (
     <div style={{
-      background: "#1A1B1E",
-      border: destaque ? "1px solid rgba(228,222,0,0.3)" : "1px solid #26272B",
-      borderRadius: 12, marginBottom: 10, overflow: "hidden",
+      background: "#1F2024",
+      border: destaque ? "1px solid rgba(228,222,0,0.4)" : "1px solid #2E2F35",
+      borderLeft: `4px solid ${corPrim}`,
+      borderRadius: 14, marginBottom: 12, overflow: "hidden", boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
     }}>
       {destaque && (
         <div style={{
@@ -2458,11 +2515,11 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExe
           <Star size={11} fill="#E4DE00" color="#E4DE00" /> Destaque
         </div>
       )}
-      <div style={{ padding: "14px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={onToggle}>
-        <div>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: destaque ? "#FFFFFF" : "#D8D8D3", letterSpacing: "0.03em", textTransform: "uppercase" }}>{w.nome || "Treino sem nome"}</div>
-          <div style={{ fontSize: 12, color: "#6B6C72", marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span>{w.data}</span>
+      <div style={{ padding: "16px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }} onClick={onToggle}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, lineHeight: 1.25, color: "#FFFFFF" }}>{tituloLegivel(w.nome) || "Treino sem nome"}</div>
+          <div style={{ fontSize: 13, color: "#A9AAB1", marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span>{dataBonita(w.data)}</span>
             {w.codigo && <Badge>#{w.codigo}</Badge>}
             <SeloProtocolo protocolo={protocolo} />
             <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
@@ -2479,7 +2536,7 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExe
           >
             <Star size={19} color={w.favorito ? "#E4DE00" : "#5f6066"} fill={w.favorito ? "#E4DE00" : "none"} />
           </button>
-          {expandido ? <ChevronDown size={18} color="#71727A" /> : <ChevronRight size={18} color="#71727A" />}
+          {expandido ? <ChevronDown size={18} color="#8E8F96" /> : <ChevronRight size={18} color="#8E8F96" />}
         </div>
       </div>
 
@@ -2489,7 +2546,7 @@ function WorkoutCard({ w, onEditar, onExcluir, onCompartilhar, onDuplicar, onExe
           {(w.resultados || []).length > 0 && (
             <div style={{ marginTop: 18 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.06em" }}>RESULTADOS</span>
+                <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.06em" }}>RESULTADOS</span>
                 <button
                   onClick={() => onCompartilharResultados(w, null)}
                   style={{ background: "none", border: "none", color: "#9A9A94", fontSize: 12, textDecoration: "underline", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 5 }}
@@ -2566,7 +2623,7 @@ function LegendaNiveis({ legendas, setLegendas, senha }) {
       }}>
         <span style={{ display: "flex", alignItems: "center", gap: 7 }}><Target size={14} color="#E4DE00" /> Legenda dos níveis</span>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {!aberto && <Lock size={12} color="#71727A" />}
+          {!aberto && <Lock size={12} color="#8E8F96" />}
           {aberto ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </span>
       </button>
@@ -2653,14 +2710,14 @@ function BannerDestaque({ banner, setBanner, senha }) {
 
             {banner.tipo === "Aviso" ? (
               <>
-                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 24, marginTop: 8, textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.1 }}>
+                <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 24, marginTop: 8, textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.1 }}>
                   {banner.titulo}
                 </div>
                 {banner.descricao && <div style={{ fontSize: 13.5, color: "#1F1F1F", marginTop: 6, lineHeight: 1.45, fontWeight: 500 }}>{banner.descricao}</div>}
               </>
             ) : workoutDoBanner ? (
               <>
-                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 26, marginTop: 8, textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.1 }}>
+                <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, marginTop: 8, textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.1 }}>
                   {workoutDoBanner.nome || "Treino sem nome"}
                 </div>
                 <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -2685,7 +2742,7 @@ function BannerDestaque({ banner, setBanner, senha }) {
               {workoutDoBanner.blocos.map((b, i) => (
                 <div key={b.id} style={{ marginBottom: 10, borderLeft: `3px solid ${corDoNivel(b.nivel)}`, paddingLeft: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 12.5, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                    <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12.5, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                       Workout {i + 1}{b.titulo ? ` — ${b.titulo}` : ""}
                     </span>
                     <PontoNivel nome={b.nivel} cor={corDoNivel(b.nivel)} />
@@ -2697,7 +2754,7 @@ function BannerDestaque({ banner, setBanner, senha }) {
                       {b.resultadoData && <div style={{ fontSize: 10.5, color: "#8C8D91", marginTop: 4 }}>{formatarDataHora(b.resultadoData)}</div>}
                     </div>
                   ) : (
-                    <div style={{ fontSize: 12, color: "#6B6C72", marginTop: 4 }}>Sem resultado registrado</div>
+                    <div style={{ fontSize: 12, color: "#9A9BA2", marginTop: 4 }}>Sem resultado registrado</div>
                   )}
                 </div>
               ))}
@@ -2722,7 +2779,7 @@ function BannerDestaque({ banner, setBanner, senha }) {
           onClick={abrirEdicao}
           style={{
             width: "100%", background: "none", border: "1px dashed #3A3B40", borderRadius: 10, padding: "12px",
-            color: "#71727A", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center",
+            color: "#8E8F96", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center",
             justifyContent: "center", gap: 6,
           }}
         >
@@ -3133,7 +3190,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <div style={{ fontSize: 12, color: "#71727A", display: "flex", alignItems: "center", gap: 5 }}>
+        <div style={{ fontSize: 12, color: "#8E8F96", display: "flex", alignItems: "center", gap: 5 }}>
           <Users size={13} /> Visível para todos {totalGeral > 0 && `· ${totalGeral} treinos`}
         </div>
         <PrimaryButton onClick={abrirNovoTreino}><Plus size={15} /> Novo treino</PrimaryButton>
@@ -3154,11 +3211,11 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
         <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <Check size={18} color={modoResultados ? "#0A0A0A" : "#E4DE00"} /> Resultados
         </span>
-        {modoResultados ? <X size={16} /> : <Lock size={14} color="#71727A" />}
+        {modoResultados ? <X size={16} /> : <Lock size={14} color="#8E8F96" />}
       </button>
 
       <div style={{ position: "relative", marginBottom: 14 }}>
-        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
+        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#8E8F96" }} />
         <TextInput
           placeholder="Buscar por qualquer palavra: nome, código, tag..."
           value={busca}
@@ -3197,14 +3254,14 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       </div>
       {filtrosAbertos && (
         <div style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 12 }}>
-          <div style={{ fontSize: 11.5, color: "#71727A", marginBottom: 6, fontWeight: 600 }}>PROTOCOLO</div>
+          <div style={{ fontSize: 11.5, color: "#8E8F96", marginBottom: 6, fontWeight: 600 }}>PROTOCOLO</div>
           <Select value={filtroProtocolo} onChange={(e) => mudar(() => setFiltroProtocolo(e.target.value))}>
             <option value="">Todos os protocolos</option>
             {protocolos.map((pr) => <option key={pr.id} value={pr.id}>{pr.titulo || "Protocolo sem título"}</option>)}
             <option value="__sem__">Sem protocolo</option>
           </Select>
 
-          <div style={{ fontSize: 11.5, color: "#71727A", margin: "12px 0 6px", fontWeight: 600 }}>NÍVEL</div>
+          <div style={{ fontSize: 11.5, color: "#8E8F96", margin: "12px 0 6px", fontWeight: 600 }}>NÍVEL</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {NIVEIS.map((n) => {
               const ativo = filtroNivelTreino === n.nome;
@@ -3223,7 +3280,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
             })}
           </div>
 
-          <div style={{ fontSize: 11.5, color: "#71727A", margin: "12px 0 6px", fontWeight: 600 }}>SITUAÇÃO</div>
+          <div style={{ fontSize: 11.5, color: "#8E8F96", margin: "12px 0 6px", fontWeight: 600 }}>SITUAÇÃO</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {[["sem_resultado", "Sem resultado"], ["com_resultado", "Com resultado"], ["nao_executado", "Não executados"], ["executado", "Executados"]].map(([id, rotulo]) => {
               const ativo = filtroStatus === id;
@@ -3401,7 +3458,7 @@ function ProtocoloForm({ inicial, onSalvar, onCancelar, onExcluir, salvando, err
             );
           })}
         </div>
-        <div style={{ fontSize: 11.5, lineHeight: 1.4, color: iconeSel ? "#E4DE00" : "#71727A", marginTop: 8 }}>
+        <div style={{ fontSize: 11.5, lineHeight: 1.4, color: iconeSel ? "#E4DE00" : "#8E8F96", marginTop: 8 }}>
           {iconeSel ? `${iconeSel.nome} — ${iconeSel.sub} (toque de novo para remover)` : "Toque em um ícone para escolher."}
         </div>
       </Field>
@@ -3456,17 +3513,17 @@ function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo,
     <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "center" }}>
       <ChevronUp
         size={17}
-        color={ehPrimeiro ? "#3A3B40" : "#71727A"}
+        color={ehPrimeiro ? "#3A3B40" : "#8E8F96"}
         style={{ cursor: ehPrimeiro ? "default" : "pointer" }}
         onClick={() => !ehPrimeiro && onMoverCima(ap.id)}
       />
       <ChevronDown
         size={17}
-        color={ehUltimo ? "#3A3B40" : "#71727A"}
+        color={ehUltimo ? "#3A3B40" : "#8E8F96"}
         style={{ cursor: ehUltimo ? "default" : "pointer" }}
         onClick={() => !ehUltimo && onMoverBaixo(ap.id)}
       />
-      <Pencil size={16} color="#71727A" style={{ cursor: "pointer" }} onClick={() => onEditar(ap)} />
+      <Pencil size={16} color="#8E8F96" style={{ cursor: "pointer" }} onClick={() => onEditar(ap)} />
     </div>
   );
 
@@ -3498,7 +3555,7 @@ function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo,
           <div style={{ position: "absolute", left: 0, bottom: 16, maxWidth: "88%" }}>
             <span style={{
               display: "inline-block", background: "#E4DE00", color: "#0A0A0A",
-              fontFamily: "'Anton', sans-serif", fontSize: 22, lineHeight: 1.2,
+              fontFamily: "'Outfit', sans-serif", fontSize: 22, lineHeight: 1.2,
               textTransform: "uppercase", padding: "6px 14px 6px 12px",
             }}>
               {ap.titulo}
@@ -3527,7 +3584,7 @@ function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo,
         </span>
         {controles}
       </div>
-      <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
+      <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
         {ap.titulo}
       </div>
       {ap.descricao && (
@@ -3638,7 +3695,7 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
         onClick={abrirNovo}
         style={{
           width: "100%", background: "none", border: "1px dashed #3A3B40", borderRadius: 10, padding: "14px",
-          color: "#71727A", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center",
+          color: "#8E8F96", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center",
           justifyContent: "center", gap: 6, marginBottom: 22,
         }}
       >
@@ -3676,7 +3733,7 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
               style={{ color: "#B9BABF", fontSize: 13, width: "100%" }}
             />
             {processandoImagem && (
-              <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 6 }}>Compactando imagem...</div>
+              <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 6 }}>Compactando imagem...</div>
             )}
             {form.imagemUrl && !processandoImagem && (
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
@@ -3719,12 +3776,12 @@ function ProtocoloCard({ p, expandido, onToggle, onEditar, onExcluir, onComparti
               <span style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 Protocolo
               </span>
-              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#FFFFFF", letterSpacing: "0.02em", textTransform: "uppercase", marginTop: 4, lineHeight: 1.15 }}>
+              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, color: "#FFFFFF", letterSpacing: "0.02em", textTransform: "uppercase", marginTop: 4, lineHeight: 1.15 }}>
                 {p.titulo || "Protocolo sem título"}
               </div>
             </div>
           </div>
-          {expandido ? <ChevronDown size={20} color="#71727A" style={{ flexShrink: 0, marginTop: 4 }} /> : <ChevronRight size={20} color="#71727A" style={{ flexShrink: 0, marginTop: 4 }} />}
+          {expandido ? <ChevronDown size={20} color="#8E8F96" style={{ flexShrink: 0, marginTop: 4 }} /> : <ChevronRight size={20} color="#8E8F96" style={{ flexShrink: 0, marginTop: 4 }} />}
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
@@ -3787,11 +3844,11 @@ function ProtocoloMini({ p, onAbrir }) {
         <IconeProtocolo id={p.icone} size={52} />
       ) : (
         <div style={{ width: 52, height: 52, borderRadius: 26, background: "#26272B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <BookOpen size={22} color="#71727A" />
+          <BookOpen size={22} color="#8E8F96" />
         </div>
       )}
       <span style={{
-        fontFamily: "'Anton', sans-serif", fontSize: 12.5, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.02em",
+        fontFamily: "'Outfit', sans-serif", fontSize: 12.5, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.02em",
         lineHeight: 1.2, textAlign: "center", wordBreak: "break-word", overflow: "hidden",
         display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
       }}>
@@ -3928,13 +3985,13 @@ function ProtocolosTab({ senha, onToast }) {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <BookOpen size={17} color="#E4DE00" />
-          <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, color: "#FFFFFF", letterSpacing: "0.06em" }}>PROTOCOLOS</span>
+          <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, color: "#FFFFFF", letterSpacing: "0.06em" }}>PROTOCOLOS</span>
         </div>
         <PrimaryButton onClick={abrirNovo}><Plus size={15} /> Novo</PrimaryButton>
       </div>
 
       <div style={{ position: "relative", marginBottom: 14 }}>
-        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
+        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#8E8F96" }} />
         <TextInput
           placeholder="Buscar por título, objetivo, tag, conteúdo..."
           value={busca}
@@ -4040,7 +4097,7 @@ function AdicionarExercicio({ biblioteca, onAdd }) {
           {sugestoes.map((e) => (
             <button key={e.id} onClick={() => adicionar(e.nome)} style={linha}>
               <span style={{ fontWeight: 700 }}>{e.nome}</span>
-              {e.grupoGrande && <span style={{ fontSize: 11, color: "#71727A" }}>{e.grupoGrande}</span>}
+              {e.grupoGrande && <span style={{ fontSize: 11, color: "#8E8F96" }}>{e.grupoGrande}</span>}
             </button>
           ))}
           {!exato && (
@@ -4094,8 +4151,8 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
         return (
           <div key={d.dia} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: lista.length ? 8 : 2 }}>
-              <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase" }}>{NOMES_DIA[d.dia]}</span>
-              {lista.length > 0 && <span style={{ fontSize: 11, color: "#71727A" }}>{lista.length} exercício{lista.length > 1 ? "s" : ""}</span>}
+              <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase" }}>{NOMES_DIA[d.dia]}</span>
+              {lista.length > 0 && <span style={{ fontSize: 11, color: "#8E8F96" }}>{lista.length} exercício{lista.length > 1 ? "s" : ""}</span>}
             </div>
             {lista.length > LIMITE_VISIVEL && (
               <button
@@ -4110,12 +4167,12 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
                     {aberto ? "Recolher anteriores" : `${ocultos} exercício${ocultos > 1 ? "s" : ""} anterior${ocultos > 1 ? "es" : ""}`}
                   </span>
                   {!aberto && (
-                    <span style={{ display: "block", fontSize: 11, color: "#71727A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <span style={{ display: "block", fontSize: 11, color: "#8E8F96", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {lista.slice(0, ocultos).map((x) => x.nome).join(", ")}
                     </span>
                   )}
                 </span>
-                {aberto ? <ChevronUp size={16} color="#71727A" /> : <ChevronDown size={16} color="#71727A" />}
+                {aberto ? <ChevronUp size={16} color="#8E8F96" /> : <ChevronDown size={16} color="#8E8F96" />}
               </button>
             )}
             {lista.map((e, j) => (j < ocultos ? null : (
@@ -4127,7 +4184,7 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
                       <div style={{ fontSize: 10.5, color: "#FF8A3D", marginTop: 2 }}>fora da biblioteca · vai para a lista de cadastro</div>
                     )}
                   </div>
-                  <X size={17} color="#71727A" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => remover(i, j)} />
+                  <X size={17} color="#8E8F96" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => remover(i, j)} />
                 </div>
                 <div style={{ marginTop: 6 }}>
                   <ObjetivoSelect valor={e.objetivo} onChange={(v) => alterar(i, j, "objetivo", v)} />
@@ -4204,28 +4261,28 @@ function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, o
               SEMANA {w.semana}/{w.total} · {formatarDiaMes(ref)} a {formatarDiaMes(fim)}
             </div>
           )}
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: item.destaque ? "#FFFFFF" : "#D8D8D3", letterSpacing: "0.03em", textTransform: "uppercase" }}>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: item.destaque ? "#FFFFFF" : "#D8D8D3", letterSpacing: "0.03em", textTransform: "uppercase" }}>
             {item.nome || (w ? `Semana ${w.semana}` : "Programação")}
           </div>
           {item.descricao && (
             <div style={{ fontSize: 13, color: "#D8D8D3", marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{item.descricao}</div>
           )}
-          <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 6, display: "flex", alignItems: "center", gap: 5 }}>
+          <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 6, display: "flex", alignItems: "center", gap: 5 }}>
             {!(item.destaque || livre) && <Lock size={11} />}
             {totalEx} exercício{totalEx === 1 ? "" : "s"} · {(item.destaque || livre) ? "Visível pra todos" : "Detalhes protegidos por senha"}
           </div>
         </div>
-        {expandido ? <ChevronDown size={18} color="#71727A" /> : <ChevronRight size={18} color="#71727A" />}
+        {expandido ? <ChevronDown size={18} color="#8E8F96" /> : <ChevronRight size={18} color="#8E8F96" />}
       </div>
 
       {expandido && (
         <div style={{ padding: "0 16px 16px", borderTop: "1px solid #2E2F34" }}>
           {diasComConteudo.length === 0 && (
-            <div style={{ fontSize: 12.5, color: "#71727A", marginTop: 14 }}>Nenhum exercício definido nesta programação.</div>
+            <div style={{ fontSize: 12.5, color: "#8E8F96", marginTop: 14 }}>Nenhum exercício definido nesta programação.</div>
           )}
           {diasComConteudo.map((d) => (
             <div key={d.dia} style={{ marginTop: 14 }}>
-              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 12.5, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12.5, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                 {NOMES_DIA[d.dia]}
               </div>
               {exerciciosDoDia(d).map((e, j) => (
@@ -4281,9 +4338,9 @@ function GraficoRanking({ titulo, ajuda, eventos }) {
     <div style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 12, padding: "14px 16px", marginTop: 18 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <BarChart3 size={18} color="#E4DE00" />
-        <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.05em" }}>{titulo}</span>
+        <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.05em" }}>{titulo}</span>
       </div>
-      <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 4, lineHeight: 1.4 }}>{ajuda}</div>
+      <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 4, lineHeight: 1.4 }}>{ajuda}</div>
 
       {eventos.length === 0 ? (
         <div style={{ fontSize: 12.5, color: "#9A9A94", marginTop: 14 }}>Ainda sem dados. Monte uma programação para começar.</div>
@@ -4296,7 +4353,7 @@ function GraficoRanking({ titulo, ajuda, eventos }) {
           {visiveis.map((l, idx) => (
             <div key={l.rotulo} style={{ marginTop: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 18, fontSize: 11, color: "#71727A", fontWeight: 700 }}>{idx + 1}º</span>
+                <span style={{ width: 18, fontSize: 11, color: "#8E8F96", fontWeight: 700 }}>{idx + 1}º</span>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#F1EFE9", fontWeight: 700 }}>{l.rotulo}</span>
                 <span style={{ fontSize: 13, fontWeight: 800, color: "#E4DE00" }}>{l.n}×</span>
               </div>
@@ -4408,14 +4465,14 @@ function EstudosPasta({ senha, onVoltar, onToast }) {
       </button>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <FlaskConical size={20} color="#E4DE00" style={{ flexShrink: 0 }} />
-        <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, color: "#FFFFFF", letterSpacing: "0.04em", lineHeight: 1.15 }}>{NOME_PASTA_ESTUDOS}</span>
+        <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, color: "#FFFFFF", letterSpacing: "0.04em", lineHeight: 1.15 }}>{NOME_PASTA_ESTUDOS}</span>
       </div>
       <div style={{ fontSize: 12.5, color: "#9A9A94", margin: "8px 0 14px", lineHeight: 1.45 }}>{DESCRICAO_PASTA_ESTUDOS}</div>
 
       <PrimaryButton onClick={abrirNovo} style={{ width: "100%", marginBottom: 12 }}><Plus size={16} /> Novo estudo</PrimaryButton>
 
       <div style={{ position: "relative", marginBottom: 10 }}>
-        <Search size={16} color="#71727A" style={{ position: "absolute", left: 12, top: 13 }} />
+        <Search size={16} color="#8E8F96" style={{ position: "absolute", left: 12, top: 13 }} />
         <TextInput value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por título, fonte ou conteúdo..." style={{ paddingLeft: 36 }} />
       </div>
       <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 14 }}>
@@ -4444,13 +4501,13 @@ function EstudosPasta({ senha, onVoltar, onToast }) {
               style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "none", border: "none", cursor: "pointer", padding: "13px 14px", textAlign: "left" }}
             >
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: "#FFFFFF", letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.2 }}>{e.titulo}</div>
+                <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 15, color: "#FFFFFF", letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.2 }}>{e.titulo}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
                   <Badge>{e.fonte}</Badge>
                   {e.atualizadoEm && <span style={{ fontSize: 11, color: "#5f6066" }}>{formatarDataHora(e.atualizadoEm)}</span>}
                 </div>
               </div>
-              {aberto ? <ChevronUp size={18} color="#71727A" /> : <ChevronDown size={18} color="#71727A" />}
+              {aberto ? <ChevronUp size={18} color="#8E8F96" /> : <ChevronDown size={18} color="#8E8F96" />}
             </button>
 
             {aberto && (
@@ -4658,8 +4715,8 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
   if (pastaAberta === null) {
     return (
       <div>
-        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, color: "#E4DE00", letterSpacing: "0.04em" }}>PROGRAMAÇÕES</div>
-        <div style={{ fontSize: 12, color: "#71727A", margin: "4px 0 14px", lineHeight: 1.4 }}>
+        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, color: "#E4DE00", letterSpacing: "0.04em" }}>PROGRAMAÇÕES</div>
+        <div style={{ fontSize: 12, color: "#8E8F96", margin: "4px 0 14px", lineHeight: 1.4 }}>
           Cada pasta tem suas próprias semanas e seus gráficos de exercícios e aptidões.
         </div>
         {carregando ? (
@@ -4680,13 +4737,13 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
                   <Folder size={22} color="#E4DE00" />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", textTransform: "uppercase" }}>{pt.nome}</div>
-                  <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 4 }}>
+                  <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", textTransform: "uppercase" }}>{pt.nome}</div>
+                  <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 4 }}>
                     {pt.semanas} semana{pt.semanas === 1 ? "" : "s"} · {pt.exercicios} exercício{pt.exercicios === 1 ? "" : "s"}
                     {pt.ultimaRef ? ` · última: ${formatarDiaMes(pt.ultimaRef)}` : ""}
                   </div>
                 </div>
-                <ChevronRight size={18} color="#71727A" />
+                <ChevronRight size={18} color="#8E8F96" />
               </button>
             ))}
             {/* Pasta HYBRID CANTIL: link + código único, só essa área */}
@@ -4704,10 +4761,10 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
                 <FlaskConical size={22} color="#E4DE00" />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1.2 }}>{NOME_PASTA_ESTUDOS}</div>
-                <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 5, lineHeight: 1.4 }}>{DESCRICAO_PASTA_ESTUDOS}</div>
+                <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 15, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1.2 }}>{NOME_PASTA_ESTUDOS}</div>
+                <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 5, lineHeight: 1.4 }}>{DESCRICAO_PASTA_ESTUDOS}</div>
               </div>
-              <Lock size={14} color="#71727A" style={{ flexShrink: 0 }} />
+              <Lock size={14} color="#8E8F96" style={{ flexShrink: 0 }} />
             </button>
             <button
               onClick={novaPasta}
@@ -4732,12 +4789,12 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
       </button>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <Folder size={20} color="#E4DE00" />
-        <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#FFFFFF", letterSpacing: "0.04em", textTransform: "uppercase" }}>{pastaAberta}</span>
+        <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, color: "#FFFFFF", letterSpacing: "0.04em", textTransform: "uppercase" }}>{pastaAberta}</span>
       </div>
       {(() => {
         const w = semanaDoAno();
         return (
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#E4DE00", letterSpacing: "0.04em", marginBottom: 10 }}>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#E4DE00", letterSpacing: "0.04em", marginBottom: 10 }}>
             SEMANA {w.semana}/{w.total}
           </div>
         );
@@ -4748,7 +4805,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <div style={{ fontSize: 12, color: "#71727A", display: "flex", alignItems: "center", gap: 5 }}>
+        <div style={{ fontSize: 12, color: "#8E8F96", display: "flex", alignItems: "center", gap: 5 }}>
           <Lock size={12} /> Detalhes protegidos por senha
         </div>
         <PrimaryButton onClick={abrirNovo}><Plus size={15} /> Nova programação</PrimaryButton>
@@ -4756,7 +4813,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
       <div style={{ height: 12 }} />
 
       <div style={{ position: "relative", marginBottom: 14 }}>
-        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#71727A" }} />
+        <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#8E8F96" }} />
         <TextInput
           placeholder="Buscar por nome..."
           value={busca}
@@ -4773,7 +4830,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
             <EmptyState text={buscaAtiva ? "Nenhuma programação encontrada." : "Nenhuma programação criada ainda. Toque em 'Nova programação'."} />
           )}
           {filtradas.length > 0 && atuais.length === 0 && (
-            <div style={{ fontSize: 12.5, color: "#71727A", marginBottom: 6 }}>
+            <div style={{ fontSize: 12.5, color: "#8E8F96", marginBottom: 6 }}>
               Nenhuma programação para esta semana. Toque em "Nova programação".
             </div>
           )}
@@ -4791,9 +4848,9 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
                 }}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <CalendarDays size={16} color="#71727A" /> Semanas anteriores ({passadas.length})
+                  <CalendarDays size={16} color="#8E8F96" /> Semanas anteriores ({passadas.length})
                 </span>
-                {passadasAbertas ? <ChevronUp size={18} color="#71727A" /> : <ChevronDown size={18} color="#71727A" />}
+                {passadasAbertas ? <ChevronUp size={18} color="#8E8F96" /> : <ChevronDown size={18} color="#8E8F96" />}
               </button>
               {passadasAbertas && <div style={{ marginTop: 10 }}>{passadas.map(renderCard)}</div>}
             </div>
@@ -4861,7 +4918,7 @@ function ViewOnlyProtocolo({ id, onVoltar }) {
           <BookOpen size={18} color="#0A0A0A" />
         </div>
         <div>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
           <div style={{ fontSize: 9, color: "#E4DE00", letterSpacing: "0.35em", marginTop: 2 }}>FITNESS</div>
         </div>
         <Badge>somente visualização</Badge>
@@ -4871,7 +4928,7 @@ function ViewOnlyProtocolo({ id, onVoltar }) {
         <div style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 12, padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {p.icone && <IconeProtocolo id={p.icone} size={40} />}
-            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>
               {p.titulo || "Protocolo sem título"}
             </div>
           </div>
@@ -4999,7 +5056,7 @@ function AvaliacaoPage({ onVoltar }) {
         <Dumbbell size={18} color="#0A0A0A" />
       </div>
       <div>
-        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
+        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
         <div style={{ fontSize: 9, color: "#E4DE00", letterSpacing: "0.35em", marginTop: 2 }}>FITNESS</div>
       </div>
     </div>
@@ -5015,7 +5072,7 @@ function AvaliacaoPage({ onVoltar }) {
             <div style={{ width: 56, height: 56, borderRadius: 28, background: "#4CAF6D22", border: "2px solid #4CAF6D", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
               <Check size={30} color="#4CAF6D" />
             </div>
-            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>Avaliação enviada!</div>
+            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>Avaliação enviada!</div>
             <div style={{ fontSize: 13.5, color: "#B9BABF", marginTop: 10, lineHeight: 1.5 }}>
               Obrigado, {nome.trim().split(" ")[0]}. Recebemos suas respostas.
             </div>
@@ -5028,8 +5085,8 @@ function AvaliacaoPage({ onVoltar }) {
           <Spinner />
         ) : (
           <div style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 12, padding: 16 }}>
-            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>Avaliação de aptidão física</div>
-            <div style={{ fontSize: 12.5, color: "#71727A", margin: "6px 0 16px" }}>Responda com atenção. Campos com * são obrigatórios.</div>
+            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>Avaliação de aptidão física</div>
+            <div style={{ fontSize: 12.5, color: "#8E8F96", margin: "6px 0 16px" }}>Responda com atenção. Campos com * são obrigatórios.</div>
             <Field label="Nome completo *">
               <TextInput value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome" />
             </Field>
@@ -5146,7 +5203,7 @@ function AvaliacaoHome({ senha, onToast }) {
       }}>
         <ClipboardList size={28} />
         <div>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 17, letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.1 }}>Avaliação de aptidão física</div>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.1 }}>Avaliação de aptidão física</div>
           <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3 }}>Toque para preencher o formulário</div>
         </div>
         <ChevronRight size={22} style={{ marginLeft: "auto" }} />
@@ -5169,8 +5226,8 @@ function AvaliacaoHome({ senha, onToast }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <Badge>Pergunta {i + 1}</Badge>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <ChevronUp size={18} color="#71727A" style={{ cursor: "pointer" }} onClick={() => mover(i, -1)} />
-                  <ChevronDown size={18} color="#71727A" style={{ cursor: "pointer" }} onClick={() => mover(i, 1)} />
+                  <ChevronUp size={18} color="#8E8F96" style={{ cursor: "pointer" }} onClick={() => mover(i, -1)} />
+                  <ChevronDown size={18} color="#8E8F96" style={{ cursor: "pointer" }} onClick={() => mover(i, 1)} />
                   <Trash2 size={16} color="#E6483F" style={{ cursor: "pointer" }} onClick={() => remover(p.id)} />
                 </div>
               </div>
@@ -5228,11 +5285,11 @@ function AvaliacaoHome({ senha, onToast }) {
                         {alerta && <AlertCircle size={20} color="#FF8A3D" style={{ flexShrink: 0, marginTop: 1 }} />}
                         <div>
                           <div style={{ fontWeight: 700, color: "#F1EFE9", fontSize: 14 }}>{item.nome}</div>
-                          <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 3 }}>{formatarDataHoraCompleta(item.enviado_em)}</div>
+                          <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 3 }}>{formatarDataHoraCompleta(item.enviado_em)}</div>
                           {alerta && <div style={{ fontSize: 11.5, color: "#FF8A3D", marginTop: 3, fontWeight: 600 }}>Avaliação com mais de 3 meses: precisa atualizar</div>}
                         </div>
                       </div>
-                      {aberto ? <ChevronUp size={18} color="#71727A" /> : <ChevronDown size={18} color="#71727A" />}
+                      {aberto ? <ChevronUp size={18} color="#8E8F96" /> : <ChevronDown size={18} color="#8E8F96" />}
                     </div>
                     {aberto && (
                       <div style={{ marginTop: 12, borderTop: "1px solid #2E2F34", paddingTop: 10 }}>
@@ -5283,7 +5340,7 @@ function ViewOnlyResultados({ id, resId, legendas }) {
         <Dumbbell size={18} color="#0A0A0A" />
       </div>
       <div>
-        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
+        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
         <div style={{ fontSize: 9, color: "#E4DE00", letterSpacing: "0.35em", marginTop: 2 }}>FITNESS</div>
       </div>
       <Badge>somente visualização</Badge>
@@ -5312,8 +5369,8 @@ function ViewOnlyResultados({ id, resId, legendas }) {
       <style>{FONT_IMPORT}</style>
       {topo}
       <div style={{ padding: "18px 16px 0", maxWidth: 640, margin: "0 auto" }}>
-        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, color: "#9A9A94", textTransform: "uppercase", letterSpacing: "0.04em" }}>{w.nome || "Treino"}</div>
-        <div style={{ fontSize: 12, color: "#71727A", marginTop: 3, marginBottom: 14 }}>{w.data}</div>
+        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 15, color: "#9A9A94", textTransform: "uppercase", letterSpacing: "0.04em" }}>{w.nome || "Treino"}</div>
+        <div style={{ fontSize: 12, color: "#8E8F96", marginTop: 3, marginBottom: 14 }}>{w.data}</div>
 
         {semResultados && (
           <div style={{ background: "#1A1B1E", border: "1px dashed #3A3B40", borderRadius: 12, padding: 18, textAlign: "center", color: "#9A9A94", fontSize: 14, marginBottom: 14 }}>
@@ -5323,7 +5380,7 @@ function ViewOnlyResultados({ id, resId, legendas }) {
 
         {lista.map((r) => (
           <div key={r.id} style={{ background: "rgba(228,222,0,0.07)", border: "1px solid rgba(228,222,0,0.4)", borderLeft: "4px solid #E4DE00", borderRadius: 12, padding: "16px 16px 18px", marginBottom: 14 }}>
-            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 17, color: "#E4DE00", letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.2 }}>
+            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, color: "#E4DE00", letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.2 }}>
               {r.rotulo || rotuloResultado(r)}
             </div>
             <div style={{ marginTop: 10, fontSize: 20, fontWeight: 600, color: "#FFFFFF", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{r.texto}</div>
@@ -5386,15 +5443,15 @@ function ViewOnlyWorkout({ id, legendas }) {
           <Dumbbell size={18} color="#0A0A0A" />
         </div>
         <div>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
           <div style={{ fontSize: 9, color: "#E4DE00", letterSpacing: "0.35em", marginTop: 2 }}>FITNESS</div>
         </div>
         <Badge>somente visualização</Badge>
       </div>
       <div style={{ padding: "16px 16px 0" }}>
         <div style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 12, padding: 16 }}>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>{w.nome || "Treino sem nome"}</div>
-          <div style={{ fontSize: 12, color: "#71727A", marginTop: 4, display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>{w.nome || "Treino sem nome"}</div>
+          <div style={{ fontSize: 12, color: "#8E8F96", marginTop: 4, display: "flex", gap: 8, alignItems: "center" }}>
             <span>{w.data}</span>
             <SeloProtocolo protocolo={protocolo} />
           </div>
@@ -5450,6 +5507,29 @@ function parseTempo(txt) {
   if (partes.length > 3 || partes.some((p) => p.trim() === "" || isNaN(Number(p)) || Number(p) < 0)) return null;
   return partes.map(Number).reduce((acc, x) => acc * 60 + x, 0);
 }
+// Digite só números: 435 -> 4:35 · 3800 -> 38:00 · 13800 -> 1:38:00 (apagar volta um dígito)
+function mascaraTempo(novo) {
+  const d = String(novo || "").replace(/\D/g, "").replace(/^0+/, "").slice(-6);
+  if (!d) return "";
+  const ss = d.slice(-2).padStart(2, "0");
+  const mm = d.slice(-4, -2);
+  const hh = d.slice(-6, -4);
+  if (hh) return `${parseInt(hh, 10)}:${mm.padStart(2, "0")}:${ss}`;
+  return `${parseInt(mm || "0", 10)}:${ss}`;
+}
+function TempoInput({ value, onChange, placeholder = "mm:ss", style }) {
+  return (
+    <TextInput
+      inputMode="numeric"
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(mascaraTempo(e.target.value))}
+      style={style}
+    />
+  );
+}
+const DicaTempo = () => <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: -6, marginBottom: 12 }}>Digite só os números: 1245 vira 12:45 · 13800 vira 1:38:00</div>;
+
 function fmtTempo(seg) {
   if (seg == null || isNaN(seg)) return "—";
   const t = Math.round(seg);
@@ -5571,9 +5651,9 @@ function RankingBarras({ linhas, formatar, menorMelhor = true, destaque = "", va
         return (
           <div key={l.rotulo + i} style={{ marginTop: i ? 10 : 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 22, fontSize: 11, color: i === 0 ? "#E4DE00" : "#71727A", fontWeight: 800 }}>{i + 1}º</span>
+              <span style={{ width: 22, fontSize: 11, color: i === 0 ? "#E4DE00" : "#8E8F96", fontWeight: 800 }}>{i + 1}º</span>
               <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: eu ? "#E4DE00" : "#F1EFE9", fontWeight: 700 }}>
-                {l.rotulo}{l.sub ? <span style={{ color: "#71727A", fontWeight: 500, fontSize: 11 }}> · {l.sub}</span> : null}
+                {l.rotulo}{l.sub ? <span style={{ color: "#8E8F96", fontWeight: 500, fontSize: 11 }}> · {l.sub}</span> : null}
               </span>
               <span style={{ fontSize: 13, fontWeight: 800, color: "#E4DE00", fontFamily: "'JetBrains Mono', monospace" }}>{formatar(l.valor)}</span>
             </div>
@@ -5611,10 +5691,110 @@ function LinhaEvolucao({ pontos, formatar, menorMelhor = true }) {
           )}
         </g>
       ))}
-      <text x={pl} y={H - 8} fontSize="9.5" fill="#71727A">{dataCurtaHy(pts[0].data)}</text>
-      {pts.length > 1 && <text x={W - pr} y={H - 8} textAnchor="end" fontSize="9.5" fill="#71727A">{dataCurtaHy(pts[pts.length - 1].data)}</text>}
+      <text x={pl} y={H - 8} fontSize="9.5" fill="#8E8F96">{dataCurtaHy(pts[0].data)}</text>
+      {pts.length > 1 && <text x={W - pr} y={H - 8} textAnchor="end" fontSize="9.5" fill="#8E8F96">{dataCurtaHy(pts[pts.length - 1].data)}</text>}
     </svg>
   );
+}
+
+const CORES_HY = ["#E4DE00", "#4B9EEA", "#FF8A3D", "#4CAF6D", "#9B6BD9", "#E6483F", "#2EC4B6", "#F78FB3"];
+// Agrupa registros em séries (por atleta ou por equipe), por data
+function montarSeries(items, { porEquipe = false, cumulativo = false } = {}) {
+  const g = {};
+  items.forEach((it) => {
+    const k = porEquipe ? normalizarTexto(it.equipe) || "sem equipe" : normalizarTexto(it.atleta);
+    if (!g[k]) g[k] = { rotulo: porEquipe ? it.equipe || "Sem equipe" : it.atleta, porData: {} };
+    (g[k].porData[it.data] = g[k].porData[it.data] || []).push(it.valor);
+  });
+  return Object.values(g).map((s) => {
+    let pontos = Object.keys(s.porData).sort().map((d) => ({
+      data: d, valor: cumulativo ? s.porData[d].reduce((x, y) => x + y, 0) : media(s.porData[d]),
+    }));
+    if (cumulativo) { let acc = 0; pontos = pontos.map((p) => { acc += p.valor; return { ...p, valor: acc }; }); }
+    return { rotulo: s.rotulo, pontos };
+  });
+}
+
+function LinhasMulti({ series, formatar, menorMelhor = true, destaque = "" }) {
+  let lista = series.filter((s) => s.pontos.length);
+  if (!lista.length) return <EmptyState text="Sem registros para mostrar neste período." />;
+  lista = lista.sort((a, b) => b.pontos.length - a.pontos.length || a.rotulo.localeCompare(b.rotulo, "pt-BR"));
+  const eu = lista.find((s) => destaque && normalizarTexto(s.rotulo) === normalizarTexto(destaque));
+  lista = lista.slice(0, 8);
+  if (eu && !lista.includes(eu)) lista[lista.length - 1] = eu;
+  const W = 320, H = 190, pl = 12, pr = 12, pt = 14, pb = 26;
+  const tempo = (d) => new Date(d + "T12:00:00").getTime();
+  const todos = lista.flatMap((s) => s.pontos);
+  const tmin = Math.min(...todos.map((p) => tempo(p.data))), tmax = Math.max(...todos.map((p) => tempo(p.data)));
+  let mn = Math.min(...todos.map((p) => p.valor)), mx = Math.max(...todos.map((p) => p.valor));
+  if (mn === mx) { mn -= 1; mx += 1; }
+  const x = (d) => (tmax === tmin ? W / 2 : pl + ((tempo(d) - tmin) / (tmax - tmin)) * (W - pl - pr));
+  const y = (v) => { const f = (v - mn) / (mx - mn); return pt + (menorMelhor ? f : 1 - f) * (H - pt - pb); };
+  const dMin = todos.map((p) => p.data).sort()[0], dMax = todos.map((p) => p.data).sort().slice(-1)[0];
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        <line x1={pl} x2={W - pr} y1={H - pb} y2={H - pb} stroke="#2E2F34" />
+        <text x={pl} y={pt - 3} fontSize="9.5" fill="#8E8F96">{formatar(menorMelhor ? mn : mx)}</text>
+        <text x={pl} y={H - pb - 4} fontSize="9.5" fill="#8E8F96">{formatar(menorMelhor ? mx : mn)}</text>
+        {lista.map((s, si) => {
+          const cor = CORES_HY[si % CORES_HY.length];
+          const souEu = s === eu;
+          return (
+            <g key={s.rotulo}>
+              {s.pontos.length > 1 && <polyline points={s.pontos.map((p) => `${x(p.data)},${y(p.valor)}`).join(" ")} fill="none" stroke={cor} strokeWidth={souEu ? 3 : 2} strokeLinejoin="round" opacity={eu && !souEu ? 0.75 : 1} />}
+              {s.pontos.map((p, i) => <circle key={i} cx={x(p.data)} cy={y(p.valor)} r={souEu ? 4 : 3} fill={cor} />)}
+            </g>
+          );
+        })}
+        <text x={pl} y={H - 8} fontSize="9.5" fill="#8E8F96">{dataCurtaHy(dMin)}</text>
+        {dMax !== dMin && <text x={W - pr} y={H - 8} textAnchor="end" fontSize="9.5" fill="#8E8F96">{dataCurtaHy(dMax)}</text>}
+      </svg>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 10 }}>
+        {lista.map((s, si) => {
+          const vals = s.pontos.map((p) => p.valor);
+          const melhor = menorMelhor ? Math.min(...vals) : Math.max(...vals);
+          return (
+            <span key={s.rotulo} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#E6E4DE" }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: CORES_HY[si % CORES_HY.length] }} />
+              <b>{s.rotulo}</b> <span style={{ color: "#8E8F96" }}>{formatar(melhor)}</span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ColunasEvolucao({ pontos, formatar, menorMelhor = true }) {
+  if (!pontos.length) return <EmptyState text="Sem registros para mostrar." />;
+  const pts = [...pontos].sort((a, b) => (a.data || "").localeCompare(b.data || "")).slice(-14);
+  const W = 320, H = 170, pt = 22, pb = 26;
+  const vals = pts.map((p) => p.valor);
+  const max = Math.max(...vals, 1);
+  const idxMelhor = vals.indexOf(menorMelhor ? Math.min(...vals) : Math.max(...vals));
+  const passo = (W - 20) / pts.length;
+  const bw = Math.min(30, passo * 0.62);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+      <line x1={8} x2={W - 8} y1={H - pb} y2={H - pb} stroke="#2E2F34" />
+      {pts.map((p, i) => {
+        const h = Math.max(3, (p.valor / max) * (H - pt - pb));
+        const cx = 10 + passo * i + passo / 2;
+        const mostrarValor = pts.length <= 8 || i === idxMelhor || i === pts.length - 1;
+        return (
+          <g key={i}>
+            <rect x={cx - bw / 2} y={H - pb - h} width={bw} height={h} rx="3" fill={i === idxMelhor ? "#E4DE00" : "#6E6C1A"} />
+            {mostrarValor && <text x={cx} y={H - pb - h - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={i === idxMelhor ? "#E4DE00" : "#D0D1D6"}>{formatar(p.valor)}</text>}
+            {(pts.length <= 8 || i % 2 === 0) && <text x={cx} y={H - 9} textAnchor="middle" fontSize="9" fill="#8E8F96">{dataCurtaHy(p.data)}</text>}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+function GraficoEvolucao({ tipo, ...props }) {
+  return tipo === "barras" ? <ColunasEvolucao {...props} /> : <LinhaEvolucao {...props} />;
 }
 
 function BlocoHy({ titulo, ajuda, icone, children }) {
@@ -5622,9 +5802,9 @@ function BlocoHy({ titulo, ajuda, icone, children }) {
     <div style={cardHy}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {icone}
-        <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.05em", textTransform: "uppercase" }}>{titulo}</span>
+        <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.05em", textTransform: "uppercase" }}>{titulo}</span>
       </div>
-      {ajuda && <div style={{ fontSize: 11.5, color: "#71727A", margin: "4px 0 12px", lineHeight: 1.4 }}>{ajuda}</div>}
+      {ajuda && <div style={{ fontSize: 11.5, color: "#8E8F96", margin: "4px 0 12px", lineHeight: 1.4 }}>{ajuda}</div>}
       {!ajuda && <div style={{ height: 10 }} />}
       {children}
     </div>
@@ -5633,20 +5813,42 @@ function BlocoHy({ titulo, ajuda, icone, children }) {
 function MiniStat({ rotulo, valor }) {
   return (
     <div style={{ flex: 1, minWidth: 0, background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: "9px 10px" }}>
-      <div style={{ fontSize: 10.5, color: "#71727A", fontWeight: 600 }}>{rotulo}</div>
+      <div style={{ fontSize: 10.5, color: "#8E8F96", fontWeight: 600 }}>{rotulo}</div>
       <div style={{ fontSize: 15, color: "#F1EFE9", fontWeight: 800, marginTop: 3, fontFamily: "'JetBrains Mono', monospace" }}>{valor}</div>
     </div>
   );
 }
 
 /* ---------------------------- aba RESULTADOS (gráficos) ---------------------------- */
-function ResultadosHybrid({ registros, sessao }) {
+function ResultadosHybrid({ registros: todosRegistros, sessao }) {
   const [modo, setModo] = useState("equipe"); // equipe | individual
   const [tema, setTema] = useState("workouts"); // workouts | corrida | hyrox
   const [agrupar, setAgrupar] = useState("atletas"); // atletas | equipes
   const [workoutKey, setWorkoutKey] = useState("");
   const [metricaCorrida, setMetricaCorrida] = useState("km");
   const [atletaSel, setAtletaSel] = useState(sessao.atleta);
+  const [grafico, setGrafico] = useState("barras"); // barras | linha
+  const [periodo, setPeriodo] = useState({ modo: "tudo", de: "", ate: "", mesDe: "", mesAte: "" }); // tudo | dias | meses
+
+  const passaPeriodo = (r) => {
+    if (periodo.modo === "dias") {
+      if (periodo.de && r.data < periodo.de) return false;
+      if (periodo.ate && r.data > periodo.ate) return false;
+    } else if (periodo.modo === "meses") {
+      const m = r.data.slice(0, 7);
+      if (periodo.mesDe && m < periodo.mesDe) return false;
+      if (periodo.mesAte && m > periodo.mesAte) return false;
+    }
+    return true;
+  };
+  const registros = todosRegistros.filter(passaPeriodo);
+  const hojeD = new Date();
+  const mesISO = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  const atalhoPeriodo = (tipo) => {
+    if (tipo === "mes") setPeriodo({ modo: "meses", de: "", ate: "", mesDe: mesISO(hojeD), mesAte: mesISO(hojeD) });
+    else if (tipo === "passado") { const d = new Date(hojeD.getFullYear(), hojeD.getMonth() - 1, 1); setPeriodo({ modo: "meses", de: "", ate: "", mesDe: mesISO(d), mesAte: mesISO(d) }); }
+    else { const ini = new Date(hojeD.getFullYear(), hojeD.getMonth(), hojeD.getDate() - 29); setPeriodo({ modo: "dias", de: dataISOLocal(ini), ate: dataISOLocal(hojeD), mesDe: "", mesAte: "" }); }
+  };
 
   const atletas = [...new Map(registros.map((r) => [normalizarTexto(r.atleta), r.atleta])).values()]
     .sort((a, b) => a.localeCompare(b, "pt-BR"));
@@ -5663,6 +5865,40 @@ function ResultadosHybrid({ registros, sessao }) {
     { rotulo: "Km corridos", valor: Math.round(kmTotal) },
     { rotulo: "Simulados", valor: doTipo("hyrox").length },
   ];
+
+  const blocoPeriodo = (
+    <div style={{ ...cardHy, padding: "12px 14px" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#A9AAB1", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+        <CalendarDays size={14} color="#E4DE00" /> Período dos gráficos
+      </div>
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 8 }}>
+        {[["tudo", "Tudo"], ["dias", "De dia a dia"], ["meses", "De mês a mês"]].map(([v, l]) => (
+          <button key={v} onClick={() => setPeriodo({ ...periodo, modo: v })} style={chipHy(periodo.modo === v)}>{l}</button>
+        ))}
+      </div>
+      {periodo.modo === "dias" && (
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}><Field label="Do dia"><TextInput type="date" value={periodo.de} onChange={(e) => setPeriodo({ ...periodo, de: e.target.value })} /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Até o dia"><TextInput type="date" value={periodo.ate} onChange={(e) => setPeriodo({ ...periodo, ate: e.target.value })} /></Field></div>
+        </div>
+      )}
+      {periodo.modo === "meses" && (
+        <>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><Field label="Do mês"><TextInput type="month" value={periodo.mesDe} onChange={(e) => setPeriodo({ ...periodo, mesDe: e.target.value })} /></Field></div>
+            <div style={{ flex: 1 }}><Field label="Até o mês"><TextInput type="month" value={periodo.mesAte} onChange={(e) => setPeriodo({ ...periodo, mesAte: e.target.value })} /></Field></div>
+          </div>
+          <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: -4, marginBottom: 8 }}>Para ver um mês só, escolha o mesmo mês nos dois campos.</div>
+        </>
+      )}
+      <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
+        <button onClick={() => atalhoPeriodo("mes")} style={chipHy(false)}>Este mês</button>
+        <button onClick={() => atalhoPeriodo("passado")} style={chipHy(false)}>Mês passado</button>
+        <button onClick={() => atalhoPeriodo("30")} style={chipHy(false)}>Últimos 30 dias</button>
+      </div>
+      {periodo.modo !== "tudo" && <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 8 }}>Mostrando {registros.length} de {todosRegistros.length} registros</div>}
+    </div>
+  );
 
   const segmentoToggle = (valor, set, opcoes) => (
     <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 12 }}>
@@ -5705,7 +5941,9 @@ function ResultadosHybrid({ registros, sessao }) {
         <BlocoHy titulo={verEquipes ? "Ranking por equipe" : "Ranking da equipe"} icone={<Users size={18} color="#E4DE00" />}
           ajuda={verEquipes ? "Média do melhor resultado de cada atleta, por equipe." : "Melhor resultado de cada atleta neste workout."}>
           {seletor}
-          <RankingBarras linhas={linhas} formatar={fmtW} menorMelhor={menorW} destaque={sessao.atleta} />
+          {grafico === "linha"
+            ? <LinhasMulti series={montarSeries(regsDoW.map((r) => ({ atleta: r.atleta, equipe: r.equipe, data: r.data, valor: valorWorkout(r) })).filter((i) => i.valor != null), { porEquipe: verEquipes })} formatar={fmtW} menorMelhor={menorW} destaque={verEquipes ? "" : sessao.atleta} />
+            : <RankingBarras linhas={linhas} formatar={fmtW} menorMelhor={menorW} destaque={sessao.atleta} />}
           {mediaGeral != null && <div style={{ marginTop: 12, fontSize: 12, color: "#9A9A94" }}>Média da equipe: <b style={{ color: "#F1EFE9" }}>{fmtW(mediaGeral)}</b></div>}
         </BlocoHy>
       );
@@ -5720,7 +5958,7 @@ function ResultadosHybrid({ registros, sessao }) {
     return (
       <BlocoHy titulo="Evolução individual" icone={<BarChart3 size={18} color="#E4DE00" />} ajuda="Como o atleta evoluiu neste workout ao longo do tempo (ponto cheio = melhor marca).">
         {seletor}
-        <LinhaEvolucao pontos={pontos} formatar={fmtW} menorMelhor={menorW} />
+        <GraficoEvolucao tipo={grafico} pontos={pontos} formatar={fmtW} menorMelhor={menorW} />
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <MiniStat rotulo="Melhor" valor={melhorV != null ? fmtW(melhorV) : "—"} />
           <MiniStat rotulo="Último" valor={ultimo != null ? fmtW(ultimo) : "—"} />
@@ -5742,7 +5980,14 @@ function ResultadosHybrid({ registros, sessao }) {
         <BlocoHy titulo={verEquipes ? "Corrida por equipe" : "Corrida da equipe"} icone={<Activity size={18} color="#E4DE00" />}
           ajuda={porKm ? "Quilômetros acumulados por atleta." : "Melhor pace (min/km) de cada atleta, em corridas de 1 km ou mais."}>
           {segmentoToggle(metricaCorrida, setMetricaCorrida, [["km", "Km total"], ["pace", "Melhor pace"]])}
-          <RankingBarras linhas={linhas} formatar={porKm ? fmtKm : fmtPace} menorMelhor={!porKm} destaque={sessao.atleta} />
+          {grafico === "linha"
+            ? <LinhasMulti
+                series={montarSeries(
+                  (porKm ? regsC.map((r) => ({ ...r, v: typeof r.dados?.km === "number" ? r.dados.km : null })) : regsC.filter((r) => (r.dados?.km || 0) >= 1).map((r) => ({ ...r, v: valorCorridaPace(r) })))
+                    .filter((r) => r.v != null).map((r) => ({ atleta: r.atleta, equipe: r.equipe, data: r.data, valor: r.v })),
+                  { porEquipe: verEquipes, cumulativo: porKm })}
+                formatar={porKm ? fmtKm : fmtTempo} menorMelhor={!porKm} destaque={verEquipes ? "" : sessao.atleta} />
+            : <RankingBarras linhas={linhas} formatar={porKm ? fmtKm : fmtPace} menorMelhor={!porKm} destaque={sessao.atleta} />}
         </BlocoHy>
       );
     }
@@ -5752,7 +5997,7 @@ function ResultadosHybrid({ registros, sessao }) {
     const paces = pontos.map((p) => p.valor);
     return (
       <BlocoHy titulo="Evolução do pace" icone={<Activity size={18} color="#E4DE00" />} ajuda="Pace médio de cada corrida (quanto mais alto no gráfico, mais rápido).">
-        <LinhaEvolucao pontos={pontos} formatar={fmtTempo} menorMelhor />
+        <GraficoEvolucao tipo={grafico} pontos={pontos} formatar={fmtTempo} menorMelhor />
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <MiniStat rotulo="Corridas" valor={meus.length} />
           <MiniStat rotulo="Km total" valor={fmtKm(kmAt)} />
@@ -5773,7 +6018,9 @@ function ResultadosHybrid({ registros, sessao }) {
         <>
           <BlocoHy titulo={verEquipes ? "Hyrox por equipe" : "Hyrox da equipe"} icone={<Trophy size={18} color="#E4DE00" />}
             ajuda="Melhor tempo total de cada atleta (só simulados completos).">
-            <RankingBarras linhas={linhas} formatar={fmtTempo} menorMelhor destaque={sessao.atleta} vazio="Nenhum simulado completo ainda." />
+            {grafico === "linha"
+              ? <LinhasMulti series={montarSeries(regsH.map((r) => ({ atleta: r.atleta, equipe: r.equipe, data: r.data, valor: valorHyrox(r) })).filter((i) => i.valor != null), { porEquipe: verEquipes })} formatar={fmtTempo} menorMelhor destaque={verEquipes ? "" : sessao.atleta} />
+              : <RankingBarras linhas={linhas} formatar={fmtTempo} menorMelhor destaque={sessao.atleta} vazio="Nenhum simulado completo ainda." />}
           </BlocoHy>
           <BlocoHy titulo="Média da equipe por estação" icone={<Timer size={18} color="#E4DE00" />} ajuda="Onde a equipe gasta mais tempo.">
             {SEGMENTOS_HYROX.map((nome, i) => mediasSeg[i] == null ? null : (
@@ -5798,7 +6045,7 @@ function ResultadosHybrid({ registros, sessao }) {
     return (
       <>
         <BlocoHy titulo="Evolução nos simulados" icone={<Trophy size={18} color="#E4DE00" />} ajuda="Tempo total de cada simulado completo.">
-          <LinhaEvolucao pontos={pontos} formatar={fmtTempo} menorMelhor />
+          <GraficoEvolucao tipo={grafico} pontos={pontos} formatar={fmtTempo} menorMelhor />
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <MiniStat rotulo="Simulados" valor={meus.length} />
             <MiniStat rotulo="Melhor total" valor={melhorV != null ? fmtTempo(melhorV) : "—"} />
@@ -5815,10 +6062,10 @@ function ResultadosHybrid({ registros, sessao }) {
                 <div key={nome} style={{ marginTop: i ? 9 : 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
                     <span style={{ color: "#F1EFE9", fontWeight: 600 }}>{nome}</span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "#E4DE00", fontWeight: 800 }}>{fmtTempo(v)} <span style={{ color: "#71727A", fontWeight: 500 }}>/ {fmtTempo(m)}</span></span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "#E4DE00", fontWeight: 800 }}>{fmtTempo(v)} <span style={{ color: "#8E8F96", fontWeight: 500 }}>/ {fmtTempo(m)}</span></span>
                   </div>
                   <div style={{ height: 5, background: "#26272B", borderRadius: 3, marginTop: 3, overflow: "hidden" }}><div style={{ width: `${(v / mx) * 100}%`, height: "100%", background: "#E4DE00" }} /></div>
-                  <div style={{ height: 3, background: "#26272B", borderRadius: 3, marginTop: 2, overflow: "hidden" }}><div style={{ width: `${((m || 0) / mx) * 100}%`, height: "100%", background: "#71727A" }} /></div>
+                  <div style={{ height: 3, background: "#26272B", borderRadius: 3, marginTop: 2, overflow: "hidden" }}><div style={{ width: `${((m || 0) / mx) * 100}%`, height: "100%", background: "#8E8F96" }} /></div>
                 </div>
               );
             })}
@@ -5834,7 +6081,7 @@ function ResultadosHybrid({ registros, sessao }) {
         {resumo.map((s) => <MiniStat key={s.rotulo} rotulo={s.rotulo} valor={s.valor} />)}
       </div>
 
-      {segmentoToggle(modo, setModo, [["equipe", "Equipe"], ["individual", "Individual"]])}
+      {segmentoToggle(modo, (v) => { setModo(v); setGrafico(v === "equipe" ? "barras" : "linha"); }, [["equipe", "Equipe"], ["individual", "Individual"]])}
       {segmentoToggle(tema, setTema, [["workouts", "Workouts"], ["corrida", "Corrida"], ["hyrox", "Hyrox"]])}
 
       {modo === "individual" && atletas.length > 0 && (
@@ -5845,6 +6092,9 @@ function ResultadosHybrid({ registros, sessao }) {
         </Field>
       )}
       {modo === "equipe" && temEquipes && segmentoToggle(agrupar, setAgrupar, [["atletas", "Por atleta"], ["equipes", "Por equipe"]])}
+
+      {blocoPeriodo}
+      {segmentoToggle(grafico, setGrafico, [["barras", "Gráfico de barras"], ["linha", "Gráfico em linha"]])}
 
       {tema === "workouts" && renderWorkouts()}
       {tema === "corrida" && renderCorrida()}
@@ -5919,7 +6169,7 @@ function RegistroHybridForm({ tipo, sessao, nomesSugeridos, salvando, onSalvar, 
           </div>
           {amrap
             ? <Field label="Repetições totais"><TextInput inputMode="decimal" value={f.reps} onChange={(e) => set("reps", e.target.value)} placeholder="Ex: 142" /></Field>
-            : <Field label="Tempo (mm:ss)"><TextInput inputMode="numeric" value={f.tempo} onChange={(e) => set("tempo", e.target.value)} placeholder="Ex: 12:45" /></Field>}
+            : <><Field label="Tempo (mm:ss)"><TempoInput value={f.tempo} onChange={(v) => set("tempo", v)} placeholder="Ex: 12:45" /></Field><DicaTempo /></>}
           <Field label="Carga (opcional)"><TextInput value={f.carga} onChange={(e) => set("carga", e.target.value)} placeholder="Ex: 43 kg / 30 lb" /></Field>
         </>
       )}
@@ -5929,8 +6179,9 @@ function RegistroHybridForm({ tipo, sessao, nomesSugeridos, salvando, onSalvar, 
           <Field label="Tipo"><Select value={f.tipoCorrida} onChange={(e) => set("tipoCorrida", e.target.value)}>{TIPOS_CORRIDA.map((o) => <option key={o}>{o}</option>)}</Select></Field>
           <div style={{ display: "flex", gap: 10 }}>
             <div style={{ flex: 1 }}><Field label="Distância (km)"><TextInput inputMode="decimal" value={f.km} onChange={(e) => set("km", e.target.value)} placeholder="Ex: 5" /></Field></div>
-            <div style={{ flex: 1 }}><Field label="Tempo total"><TextInput inputMode="numeric" value={f.tempo} onChange={(e) => set("tempo", e.target.value)} placeholder="Ex: 24:30" /></Field></div>
+            <div style={{ flex: 1 }}><Field label="Tempo total"><TempoInput value={f.tempo} onChange={(v) => set("tempo", v)} placeholder="Ex: 24:30" /></Field></div>
           </div>
+          <DicaTempo />
           {parseTempo(f.tempo) && Number(String(f.km).replace(",", ".")) > 0 && (
             <div style={{ fontSize: 13, color: "#E4DE00", fontWeight: 700, marginBottom: 12 }}>Pace: {fmtPace(parseTempo(f.tempo) / Number(String(f.km).replace(",", ".")))}</div>
           )}
@@ -5944,16 +6195,16 @@ function RegistroHybridForm({ tipo, sessao, nomesSugeridos, salvando, onSalvar, 
             <div style={{ flex: 1 }}><Field label="Categoria"><Select value={f.categoria} onChange={(e) => set("categoria", e.target.value)}>{CATEGORIAS_HYROX.map((o) => <option key={o}>{o}</option>)}</Select></Field></div>
             <div style={{ flex: 2 }}><Field label="Nome (opcional)"><TextInput value={f.nome} onChange={(e) => set("nome", e.target.value)} placeholder="Ex: Simulado 3" /></Field></div>
           </div>
-          <div style={{ fontSize: 12, color: "#71727A", marginBottom: 8 }}>Tempo de cada parcial (mm:ss). Pode deixar em branco o que não fez.</div>
+          <div style={{ fontSize: 12, color: "#8E8F96", marginBottom: 8 }}>Tempo de cada parcial: digite só números (435 vira 4:35). Pode deixar em branco o que não fez.</div>
           {SEGMENTOS_HYROX.map((nome, i) => (
             <div key={nome} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
               <span style={{ flex: 1, fontSize: 12.5, color: ehCorridaHyrox(i) ? "#4B9EEA" : "#F1EFE9", fontWeight: ehCorridaHyrox(i) ? 500 : 700 }}>{nome}</span>
-              <TextInput inputMode="numeric" value={f.segs[i]} placeholder="mm:ss" style={{ width: 90, padding: "7px 10px" }}
-                onChange={(e) => setF((p) => ({ ...p, segs: p.segs.map((s, j) => (j === i ? e.target.value : s)) }))} />
+              <TempoInput value={f.segs[i]} placeholder="mm:ss" style={{ width: 96, padding: "7px 10px" }}
+                onChange={(v) => setF((p) => ({ ...p, segs: p.segs.map((s, j) => (j === i ? v : s)) }))} />
             </div>
           ))}
           <div style={{ fontSize: 14, color: "#E4DE00", fontWeight: 800, margin: "10px 0 14px" }}>
-            Total: {fmtTempo(totalHyrox)} <span style={{ color: "#71727A", fontWeight: 500, fontSize: 12 }}>({preenchidos}/{SEGMENTOS_HYROX.length} parciais)</span>
+            Total: {fmtTempo(totalHyrox)} <span style={{ color: "#8E8F96", fontWeight: 500, fontSize: 12 }}>({preenchidos}/{SEGMENTOS_HYROX.length} parciais)</span>
           </div>
         </>
       )}
@@ -5999,10 +6250,10 @@ function RegistroHybridCard({ r, minha, onExcluir }) {
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14.5, color: "#FFFFFF", fontWeight: 800 }}>{r.nome}</div>
-          <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 3 }}>{r.atleta} · {r.equipe} · {dataCurtaHy(r.data)}</div>
+          <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 3 }}>{r.atleta} · {r.equipe} · {dataCurtaHy(r.data)}</div>
         </div>
-        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, color: "#E4DE00", letterSpacing: "0.03em", lineHeight: 1 }}>{destaque}</div>
-        <button onClick={() => onExcluir(r)} title="Excluir" style={{ background: "none", border: "none", color: "#71727A", cursor: "pointer", padding: 2 }}><Trash2 size={15} /></button>
+        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, color: "#E4DE00", letterSpacing: "0.03em", lineHeight: 1 }}>{destaque}</div>
+        <button onClick={() => onExcluir(r)} title="Excluir" style={{ background: "none", border: "none", color: "#8E8F96", cursor: "pointer", padding: 2 }}><Trash2 size={15} /></button>
       </div>
       {badges.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>{badges.map((b) => <Badge key={b}>{b}</Badge>)}</div>}
       {linhas.map((l, i) => <div key={i} style={{ fontSize: 12, color: "#9A9A94", marginTop: 6, lineHeight: 1.4, whiteSpace: "pre-wrap" }}>{l}</div>)}
@@ -6026,8 +6277,8 @@ function ListaHybrid({ tipo, registros, sessao, onNovo, onExcluir }) {
     .sort((a, b) => b.data.localeCompare(a.data) || String(b.criadoEm).localeCompare(String(a.criadoEm)));
   return (
     <div>
-      <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, color: "#E4DE00", letterSpacing: "0.04em" }}>{info.titulo}</div>
-      <div style={{ fontSize: 12, color: "#71727A", margin: "4px 0 12px", lineHeight: 1.4 }}>{info.ajuda}</div>
+      <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, color: "#E4DE00", letterSpacing: "0.04em" }}>{info.titulo}</div>
+      <div style={{ fontSize: 12, color: "#8E8F96", margin: "4px 0 12px", lineHeight: 1.4 }}>{info.ajuda}</div>
       <PrimaryButton onClick={onNovo} style={{ width: "100%", marginBottom: 12 }}><Plus size={16} /> Novo registro</PrimaryButton>
       <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
         <button onClick={() => setSoMeus(false)} style={chipHy(!soMeus)}>Todos</button>
@@ -6048,7 +6299,7 @@ function AcessoHybrid({ onEntrar, erro, entrando, inicial }) {
     <div style={{ maxWidth: 420, margin: "0 auto", padding: "56px 20px" }}>
       <div style={{ textAlign: "center", marginBottom: 26 }}>
         <div style={{ width: 54, height: 54, borderRadius: 12, background: "#E4DE00", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Trophy size={28} color="#0A0A0A" /></div>
-        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, color: "#FFFFFF", letterSpacing: "0.04em", marginTop: 12, lineHeight: 1 }}>{NOME_PASTA_HYBRID}</div>
+        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 30, color: "#FFFFFF", letterSpacing: "0.04em", marginTop: 12, lineHeight: 1 }}>{NOME_PASTA_HYBRID}</div>
         <div style={{ fontSize: 12, color: "#9A9A94", marginTop: 8, lineHeight: 1.5 }}>Resultados, provas, treinos específicos, corrida e simulados de HYROX da equipe.</div>
       </div>
       <Field label="Código de acesso"><TextInput type="password" value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="Código da equipe" onKeyDown={(e) => e.key === "Enter" && enviar()} /></Field>
@@ -6144,13 +6395,13 @@ function HybridCantil() {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 38, height: 38, borderRadius: 8, background: "#E4DE00", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Trophy size={20} color="#0A0A0A" /></div>
             <div>
-              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>HYBRID</div>
+              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>HYBRID</div>
               <div style={{ fontSize: 10, color: "#E4DE00", letterSpacing: "0.4em", marginTop: 3 }}>CANTIL</div>
             </div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 12, color: "#F1EFE9", fontWeight: 700 }}>{sessao.atleta}</div>
-            <button onClick={sair} style={{ background: "none", border: "none", color: "#71727A", fontSize: 11, cursor: "pointer", padding: 0 }}>Sair</button>
+            <button onClick={sair} style={{ background: "none", border: "none", color: "#8E8F96", fontSize: 11, cursor: "pointer", padding: 0 }}>Sair</button>
           </div>
         </div>
       </div>
@@ -6179,7 +6430,7 @@ function HybridCantil() {
             const Icon = a.icon;
             const ativo = aba === a.id;
             return (
-              <button key={a.id} onClick={() => setAba(a.id)} style={{ flex: 1, background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: ativo ? "#E4DE00" : "#71727A", padding: "6px 0" }}>
+              <button key={a.id} onClick={() => setAba(a.id)} style={{ flex: 1, background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: ativo ? "#E4DE00" : "#8E8F96", padding: "6px 0" }}>
                 <Icon size={20} />
                 <span style={{ fontSize: 10.5, fontWeight: 600 }}>{a.label}</span>
               </button>
@@ -6218,10 +6469,10 @@ function PastaHybridCard({ senha, pedir, onToast }) {
           <Trophy size={22} color="#E4DE00" />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em" }}>{NOME_PASTA_HYBRID}</div>
-          <div style={{ fontSize: 11.5, color: "#71727A", marginTop: 5, lineHeight: 1.4 }}>{DESCRICAO_PASTA_HYBRID}</div>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.03em" }}>{NOME_PASTA_HYBRID}</div>
+          <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 5, lineHeight: 1.4 }}>{DESCRICAO_PASTA_HYBRID}</div>
         </div>
-        <ChevronRight size={18} color="#71727A" />
+        <ChevronRight size={18} color="#8E8F96" />
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button onClick={copiar} style={{ ...chipHy(false), display: "flex", alignItems: "center", gap: 6 }}><Copy size={13} /> Copiar link</button>
@@ -6269,7 +6520,7 @@ function BarraAbas({ abas, aba, setAba, senha }) {
             return (
               <button key={a.id} onClick={() => escolher(a.id)} style={{
                 flex: 1, background: "none", border: "none", cursor: "pointer", display: "flex",
-                flexDirection: "column", alignItems: "center", gap: 3, color: ativo ? "#E4DE00" : "#71727A", padding: "6px 0",
+                flexDirection: "column", alignItems: "center", gap: 3, color: ativo ? "#E4DE00" : "#8E8F96", padding: "6px 0",
               }}>
                 <Icon size={20} />
                 <span style={{ fontSize: 10.5, fontWeight: 600 }}>{a.label}</span>
@@ -6379,7 +6630,7 @@ export default function App() {
               <Dumbbell size={20} color="#0A0A0A" />
             </div>
             <div>
-              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
+              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, color: "#FFFFFF", letterSpacing: "0.03em", lineHeight: 1 }}>CANTIL</div>
               <div style={{ fontSize: 10, color: "#E4DE00", letterSpacing: "0.4em", marginTop: 3 }}>FITNESS</div>
             </div>
           </div>
