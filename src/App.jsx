@@ -5,7 +5,7 @@ import {
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
   ClipboardList, AlertCircle, BarChart3, Copy, Folder, SlidersHorizontal, FlaskConical,
-  Activity, Trophy
+  Activity, Trophy, Unlock
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -701,6 +701,24 @@ async function inserirProgramacaoDb(p) {
 async function atualizarProgramacaoDb(id, p) {
   const payload = { ...programacaoToDb(p), atualizado_em: new Date().toISOString() };
   return gravarProgramacao((d) => supabase.from("programacoes_semanais").update(d).eq("id", id).select().single(), payload);
+}
+// Acesso de cada pasta: "aberta" (qualquer um entra) ou "senha". Tabela pasta_config (pastas_config.sql)
+async function fetchPastasConfig() {
+  const { data, error } = await supabase.from("pasta_config").select("*");
+  if (error) { console.error(error); return {}; }
+  const m = {};
+  (data || []).forEach((r) => { m[r.chave] = r.acesso; });
+  return m;
+}
+async function salvarPastaConfigDb(nome, acesso) {
+  const { error } = await supabase.from("pasta_config").upsert({ chave: normalizarTexto(nome), nome, acesso, atualizado_em: new Date().toISOString() });
+  if (error) { console.error(error); return false; }
+  return true;
+}
+async function excluirPastaDb(nome, ids) {
+  for (const id of ids) await excluirProgramacaoDb(id);
+  const { error } = await supabase.from("pasta_config").delete().eq("chave", normalizarTexto(nome));
+  if (error) console.error(error);
 }
 async function excluirProgramacaoDb(id) {
   const { error } = await supabase.from("programacoes_semanais").delete().eq("id", id);
@@ -4313,6 +4331,7 @@ function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, o
 function GraficoRanking({ titulo, ajuda, eventos }) {
   const [mesSel, setMesSel] = useState("");
   const [verTodos, setVerTodos] = useState(false);
+  const [tipoG, setTipoG] = useState("barras"); // barras | linha
 
   const meses = [...new Set(eventos.map((e) => e.mes))].sort().slice(-12);
   const mesAtual = meses.includes(mesSel) ? mesSel : "";
@@ -4346,10 +4365,31 @@ function GraficoRanking({ titulo, ajuda, eventos }) {
         <div style={{ fontSize: 12.5, color: "#9A9A94", marginTop: 14 }}>Ainda sem dados. Monte uma programação para começar.</div>
       ) : (
         <>
-          <div style={{ display: "flex", gap: 6, overflowX: "auto", marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+            <button onClick={() => setTipoG("barras")} style={chip(tipoG === "barras")}>Barras</button>
+            <button onClick={() => setTipoG("linha")} style={chip(tipoG === "linha")}>Linha</button>
+          </div>
+          {tipoG === "barras" && (
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", marginTop: 10 }}>
             <button onClick={() => setMesSel("")} style={chip(mesAtual === "")}>Todos</button>
             {meses.map((m) => <button key={m} onClick={() => setMesSel(m)} style={chip(mesAtual === m)}>{rotuloMes(m)}</button>)}
           </div>
+          )}
+          {tipoG === "linha" ? (() => {
+            const total = {};
+            eventos.forEach((e) => { const k = normalizarTexto(e.rotulo); if (k) { total[k] = total[k] || { rotulo: e.rotulo, n: 0 }; total[k].n++; } });
+            const top = Object.values(total).sort((x, y) => y.n - x.n).slice(0, 6);
+            const series = top.map((t) => ({
+              rotulo: t.rotulo,
+              pontos: meses.map((m) => ({ data: `${m}-01`, valor: eventos.filter((e) => e.mes === m && normalizarTexto(e.rotulo) === normalizarTexto(t.rotulo)).length })),
+            }));
+            return (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 11.5, color: "#8E8F96", marginBottom: 8 }}>Quantas vezes por mês (os 6 mais usados).</div>
+                <LinhasMulti series={series} formatar={(n) => `${Math.round(n)}×`} menorMelhor={false} rotuloX={(d) => `${MESES_ABREV[Number(d.slice(5, 7)) - 1]}/${d.slice(2, 4)}`} />
+              </div>
+            );
+          })() : (<>
           {visiveis.map((l, idx) => (
             <div key={l.rotulo} style={{ marginTop: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -4367,6 +4407,7 @@ function GraficoRanking({ titulo, ajuda, eventos }) {
               {verTodos ? "Ver só os 10 primeiros" : `Ver todos (${linhas.length})`}
             </button>
           )}
+          </>)}
         </>
       )}
     </div>
@@ -4590,13 +4631,15 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
   const [mostrarPassadas, setMostrarPassadas] = useState(false);
   const [pastaAberta, setPastaAberta] = useState(null); // null = lista de pastas
   const [estudosAberto, setEstudosAberto] = useState(false); // pasta fixa de estudos
+  const [pastasCfg, setPastasCfg] = useState({}); // chave da pasta -> "aberta" | "senha"
   const { pedir, Modal } = useSenhaGate(senha);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
-    const [progs, exs] = await Promise.all([fetchProgramacoes(), fetchExercicios()]);
+    const [progs, exs, cfg] = await Promise.all([fetchProgramacoes(), fetchExercicios(), fetchPastasConfig()]);
     setProgramacoes(progs);
     setBiblioteca(exs);
+    setPastasCfg(cfg);
     setCarregando(false);
   }, []);
 
@@ -4656,9 +4699,30 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
     setPastaAberta(existente ? existente.nome : nome);
     if (!existente) abrirNovo(); // já abre a primeira semana da pasta nova
   };
+  // CT é aberta por padrão; as demais pastas pedem senha por padrão (dá para trocar em cada pasta)
+  const acessoDe = (nome) => pastasCfg[normalizarTexto(nome)] || (mesmaPasta(nome, PASTA_CT) ? "aberta" : "senha");
+  const entrarPasta = (nome) => {
+    if (acessoDe(nome) === "senha") pedir(() => setPastaAberta(nome));
+    else setPastaAberta(nome);
+  };
+  const definirAcesso = (nome, acesso) => pedir(async () => {
+    if (acessoDe(nome) === acesso) return;
+    const ok = await salvarPastaConfigDb(nome, acesso);
+    setPastasCfg((p) => ({ ...p, [normalizarTexto(nome)]: acesso }));
+    if (onToast) onToast(ok ? (acesso === "aberta" ? "Pasta aberta para todos" : "Pasta protegida por senha") : "Não consegui salvar no banco: rode o pastas_config.sql");
+  });
   const sairDaPasta = () => { setPastaAberta(null); setBusca(""); setExpandidoId(null); setMostrarPassadas(false); };
 
   const daPasta = pastaAberta ? programacoes.filter((p) => mesmaPasta(pastaDe(p), pastaAberta)) : [];
+  const apagarPasta = () => pedir(async () => {
+    const n = daPasta.length;
+    if (!window.confirm(`Apagar a pasta "${pastaAberta}"${n ? ` e as ${n} semana${n === 1 ? "" : "s"} dentro dela` : ""}? Essa ação não pode ser desfeita.`)) return;
+    await excluirPastaDb(pastaAberta, daPasta.map((p) => p.id));
+    setPastasCfg((p) => { const c = { ...p }; delete c[normalizarTexto(pastaAberta)]; return c; });
+    sairDaPasta();
+    await carregar();
+    if (onToast) onToast("Pasta apagada");
+  });
   const buscaAtiva = busca.trim().length > 0;
   const filtradas = buscaAtiva
     ? daPasta.filter((p) => (p.nome || "").toLowerCase().includes(busca.trim().toLowerCase()))
@@ -4726,7 +4790,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
             {pastas.map((pt) => (
               <button
                 key={pt.chave}
-                onClick={() => setPastaAberta(pt.nome)}
+                onClick={() => entrarPasta(pt.nome)}
                 style={{
                   width: "100%", display: "flex", alignItems: "center", gap: 12, textAlign: "left", cursor: "pointer",
                   background: "#1A1B1E", border: "1px solid #26272B", borderLeft: "3px solid #E4DE00", borderRadius: 12,
@@ -4741,6 +4805,10 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
                   <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 4 }}>
                     {pt.semanas} semana{pt.semanas === 1 ? "" : "s"} · {pt.exercicios} exercício{pt.exercicios === 1 ? "" : "s"}
                     {pt.ultimaRef ? ` · última: ${formatarDiaMes(pt.ultimaRef)}` : ""}
+                  </div>
+                  <div style={{ fontSize: 11.5, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 5, color: acessoDe(pt.nome) === "senha" ? "#FF8A3D" : "#4CAF6D", fontWeight: 700 }}>
+                    {acessoDe(pt.nome) === "senha" ? <Lock size={12} /> : <Unlock size={12} />}
+                    {acessoDe(pt.nome) === "senha" ? "Com senha" : "Aberta para todos"}
                   </div>
                 </div>
                 <ChevronRight size={18} color="#8E8F96" />
@@ -4790,6 +4858,23 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <Folder size={20} color="#E4DE00" />
         <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, color: "#FFFFFF", letterSpacing: "0.04em", textTransform: "uppercase" }}>{pastaAberta}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", margin: "4px 0 12px" }}>
+        <span style={{ fontSize: 12, color: "#A9AAB1", fontWeight: 700 }}>Acesso:</span>
+        {[["aberta", "Aberta", Unlock], ["senha", "Com senha", Lock]].map(([v, l, Ic]) => {
+          const ativo = acessoDe(pastaAberta) === v;
+          return (
+            <button key={v} onClick={() => definirAcesso(pastaAberta, v)} style={{
+              display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", borderRadius: 999, padding: "5px 12px", fontSize: 12.5,
+              fontWeight: ativo ? 800 : 600, background: ativo ? "#E4DE00" : "#1C1D20", color: ativo ? "#0A0A0A" : "#B9BABF", border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}`,
+            }}><Ic size={12} /> {l}</button>
+          );
+        })}
+        {!mesmaPasta(pastaAberta, PASTA_CT) && (
+          <button onClick={apagarPasta} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", background: "none", border: "1px solid #E6483F55", color: "#E6483F", borderRadius: 999, padding: "5px 12px", fontSize: 12.5, fontWeight: 700 }}>
+            <Trash2 size={12} /> Apagar pasta
+          </button>
+        )}
       </div>
       {(() => {
         const w = semanaDoAno();
@@ -5715,7 +5800,7 @@ function montarSeries(items, { porEquipe = false, cumulativo = false } = {}) {
   });
 }
 
-function LinhasMulti({ series, formatar, menorMelhor = true, destaque = "" }) {
+function LinhasMulti({ series, formatar, menorMelhor = true, destaque = "", rotuloX = dataCurtaHy }) {
   let lista = series.filter((s) => s.pontos.length);
   if (!lista.length) return <EmptyState text="Sem registros para mostrar neste período." />;
   lista = lista.sort((a, b) => b.pontos.length - a.pontos.length || a.rotulo.localeCompare(b.rotulo, "pt-BR"));
@@ -5747,8 +5832,8 @@ function LinhasMulti({ series, formatar, menorMelhor = true, destaque = "" }) {
             </g>
           );
         })}
-        <text x={pl} y={H - 8} fontSize="9.5" fill="#8E8F96">{dataCurtaHy(dMin)}</text>
-        {dMax !== dMin && <text x={W - pr} y={H - 8} textAnchor="end" fontSize="9.5" fill="#8E8F96">{dataCurtaHy(dMax)}</text>}
+        <text x={pl} y={H - 8} fontSize="9.5" fill="#8E8F96">{rotuloX(dMin)}</text>
+        {dMax !== dMin && <text x={W - pr} y={H - 8} textAnchor="end" fontSize="9.5" fill="#8E8F96">{rotuloX(dMax)}</text>}
       </svg>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 10 }}>
         {lista.map((s, si) => {
