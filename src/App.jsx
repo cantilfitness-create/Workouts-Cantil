@@ -5,7 +5,7 @@ import {
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
   ClipboardList, AlertCircle, BarChart3, Copy, Folder, SlidersHorizontal, FlaskConical,
-  Activity, Trophy, Unlock
+  Activity, Trophy, Unlock, Eye, EyeOff
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -760,17 +760,19 @@ async function removerBannerDb() {
   if (error) console.error(error);
 }
 
+const apresentacaoFromDb = (r) => ({
+  id: r.id, tag: r.tag || "", titulo: r.titulo || "", descricao: r.descricao || "",
+  imagemUrl: r.imagem_url || "", ordem: r.ordem, criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
+  data: (r.data || "").slice(0, 10), resumo: r.resumo || "", oculta: !!r.oculta,
+});
+const ehErroColuna = (e) => !!e && (e.code === "42703" || e.code === "PGRST204" || /column/i.test(e.message || ""));
 async function fetchApresentacoes() {
   const { data, error } = await supabase
     .from("apresentacoes").select("*")
     .order("ordem", { ascending: true, nullsFirst: false })
     .order("criado_em", { ascending: true });
   if (error) { console.error(error); return []; }
-  let rows = data.map((r) => ({
-    id: r.id, tag: r.tag || "", titulo: r.titulo || "", descricao: r.descricao || "",
-    imagemUrl: r.imagem_url || "", ordem: r.ordem,
-    criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
-  }));
+  let rows = data.map(apresentacaoFromDb);
   const semOrdem = rows.some((r) => r.ordem === null || r.ordem === undefined);
   if (semOrdem) {
     rows = rows.map((r, i) => ({ ...r, ordem: i }));
@@ -778,25 +780,37 @@ async function fetchApresentacoes() {
   }
   return rows;
 }
+async function fetchApresentacaoById(id) {
+  const { data, error } = await supabase.from("apresentacoes").select("*").eq("id", id).maybeSingle();
+  if (error || !data) { if (error) console.error(error); return null; }
+  return apresentacaoFromDb(data);
+}
 async function inserirApresentacaoDb(ap, ordem) {
   const agora = new Date().toISOString();
-  const payload = {
+  const base = {
     tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "",
     imagem_url: ap.imagemUrl || "", ordem, criado_em: agora, atualizado_em: agora,
   };
-  const { data, error } = await supabase.from("apresentacoes").insert(payload).select().single();
+  const extra = { data: ap.data || null, resumo: ap.resumo || "", oculta: !!ap.oculta };
+  let { data, error } = await supabase.from("apresentacoes").insert({ ...base, ...extra }).select().single();
+  if (error && ehErroColuna(error)) ({ data, error } = await supabase.from("apresentacoes").insert(base).select().single()); // banco sem o noticias_ct.sql
   if (error) { console.error(error); return null; }
-  return {
-    id: data.id, tag: data.tag || "", titulo: data.titulo || "", descricao: data.descricao || "",
-    imagemUrl: data.imagem_url || "", ordem: data.ordem, criadoEm: data.criado_em, atualizadoEm: data.atualizado_em,
-  };
+  return apresentacaoFromDb(data);
 }
 async function atualizarApresentacaoDb(id, ap) {
-  const payload = {
+  const base = {
     tag: ap.tag || "", titulo: ap.titulo || "", descricao: ap.descricao || "",
     imagem_url: ap.imagemUrl || "", atualizado_em: new Date().toISOString(),
   };
-  const { error } = await supabase.from("apresentacoes").update(payload).eq("id", id);
+  const extra = { data: ap.data || null, resumo: ap.resumo || "" };
+  let { error } = await supabase.from("apresentacoes").update({ ...base, ...extra }).eq("id", id);
+  if (error && ehErroColuna(error)) ({ error } = await supabase.from("apresentacoes").update(base).eq("id", id));
+  if (error) { console.error(error); return false; }
+  return true;
+}
+// Esconde / traz de volta (campos: oculta, data, ordem)
+async function atualizarCamposApresentacaoDb(id, campos) {
+  const { error } = await supabase.from("apresentacoes").update({ ...campos, atualizado_em: new Date().toISOString() }).eq("id", id);
   if (error) { console.error(error); return false; }
   return true;
 }
@@ -3526,7 +3540,38 @@ function ProtocoloForm({ inicial, onSalvar, onCancelar, onExcluir, salvando, err
   );
 }
 
-function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo, ehPrimeiro, ehUltimo }) {
+const dataExtensa = (iso) => (/^\d{4}-\d{2}-\d{2}/.test(String(iso || "")) ? `${Number(iso.slice(8, 10))} ${MESES_ABREV[Number(iso.slice(5, 7)) - 1].toUpperCase()} ${iso.slice(0, 4)}` : "");
+function buildShareUrlNoticia(id) {
+  const { origin, pathname } = window.location;
+  return `${origin}${pathname}#/n/${id}`;
+}
+function parseHashNoticiaId() {
+  const m = window.location.hash.match(/^#\/n\/(.+)$/);
+  return m ? m[1] : null;
+}
+const TAGS_NOTICIA = ["DICA DO CT", "NOTÍCIA", "AVISO", "SOBRE O MÉTODO"];
+
+function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo, ehPrimeiro, ehUltimo, onOcultar, onCompartilhar }) {
+  const [lerTudo, setLerTudo] = useState(false);
+  const temResumo = !!ap.resumo && ap.resumo.trim() !== (ap.descricao || "").trim();
+  const texto = temResumo && !lerTudo ? ap.resumo : ap.descricao || ap.resumo;
+  const corpo = (
+    <>
+      {ap.data && (
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#E4DE00", marginTop: 12, letterSpacing: "0.05em" }}>
+          <CalendarDays size={13} /> {dataExtensa(ap.data)}
+        </div>
+      )}
+      {texto && (
+        <div style={{ fontSize: 15, color: "#D0D1D6", lineHeight: 1.65, marginTop: ap.data ? 8 : 14, whiteSpace: "pre-wrap" }}>{texto}</div>
+      )}
+      {temResumo && ap.descricao && (
+        <button onClick={() => setLerTudo(!lerTudo)} style={{ background: "none", border: "none", color: "#E4DE00", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0, marginTop: 10 }}>
+          {lerTudo ? "Mostrar só o resumo" : "Ler completo"}
+        </button>
+      )}
+    </>
+  );
   const controles = (
     <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "center" }}>
       <ChevronUp
@@ -3541,6 +3586,8 @@ function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo,
         style={{ cursor: ehUltimo ? "default" : "pointer" }}
         onClick={() => !ehUltimo && onMoverBaixo(ap.id)}
       />
+      {onCompartilhar && <Share2 size={16} color="#8E8F96" style={{ cursor: "pointer" }} onClick={() => onCompartilhar(ap)} />}
+      {onOcultar && <EyeOff size={16} color="#8E8F96" style={{ cursor: "pointer" }} onClick={() => onOcultar(ap)} />}
       <Pencil size={16} color="#8E8F96" style={{ cursor: "pointer" }} onClick={() => onEditar(ap)} />
     </div>
   );
@@ -3580,11 +3627,7 @@ function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo,
             </span>
           </div>
         </div>
-        {ap.descricao && (
-          <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
-            {ap.descricao}
-          </div>
-        )}
+        {corpo}
         <div style={{ height: 1, background: "#26272B", marginTop: 20 }} />
       </div>
     );
@@ -3605,11 +3648,7 @@ function BlocoApresentacao({ ap, onEditar, onExcluir, onMoverCima, onMoverBaixo,
       <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, lineHeight: 1.15, color: "#FFFFFF", textTransform: "uppercase", letterSpacing: "0.01em" }}>
         {ap.titulo}
       </div>
-      {ap.descricao && (
-        <div style={{ fontSize: 14, color: "#B9BABF", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>
-          {ap.descricao}
-        </div>
-      )}
+      {corpo}
       <div style={{ height: 1, background: "#26272B", marginTop: 20 }} />
     </div>
   );
@@ -3622,7 +3661,10 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
   const [salvando, setSalvando] = useState(false);
   const [processandoImagem, setProcessandoImagem] = useState(false);
   const [erro, setErro] = useState("");
-  const [form, setForm] = useState({ tag: "SOBRE O MÉTODO", titulo: "", descricao: "", imagemUrl: "" });
+  const [form, setForm] = useState({ tag: "DICA DO CT", titulo: "", descricao: "", imagemUrl: "", data: dataISOLocal(new Date()), resumo: "" });
+  const [verArquivo, setVerArquivo] = useState(false);
+  const visiveis = apresentacoes.filter((x) => !x.oculta);
+  const ocultas = apresentacoes.filter((x) => x.oculta);
 
   const escolherFoto = async (e) => {
     const arquivo = e.target.files && e.target.files[0];
@@ -3640,7 +3682,7 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
 
   const abrirNovo = () => pedir(() => {
     setEditandoId(null);
-    setForm({ tag: "SOBRE O MÉTODO", titulo: "", descricao: "", imagemUrl: "" });
+    setForm({ tag: "DICA DO CT", titulo: "", descricao: "", imagemUrl: "", data: dataISOLocal(new Date()), resumo: "" });
     setErro("");
     setSheetAberto(true);
   });
@@ -3660,20 +3702,45 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
   });
 
   const mover = (id, direcao) => pedir(async () => {
-    const idx = apresentacoes.findIndex((a) => a.id === id);
+    const idx = visiveis.findIndex((x) => x.id === id);
     const novoIdx = idx + direcao;
-    if (novoIdx < 0 || novoIdx >= apresentacoes.length) return;
-    const atual = apresentacoes[idx];
-    const vizinho = apresentacoes[novoIdx];
-    const novos = [...apresentacoes];
-    novos[idx] = { ...vizinho, ordem: atual.ordem };
-    novos[novoIdx] = { ...atual, ordem: vizinho.ordem };
-    novos.sort((a, b) => a.ordem - b.ordem);
+    if (idx < 0 || novoIdx < 0 || novoIdx >= visiveis.length) return;
+    const atual = visiveis[idx];
+    const vizinho = visiveis[novoIdx];
+    const novos = apresentacoes
+      .map((x) => (x.id === atual.id ? { ...x, ordem: vizinho.ordem } : x.id === vizinho.id ? { ...x, ordem: atual.ordem } : x))
+      .sort((p, q) => p.ordem - q.ordem);
     setApresentacoes(novos);
     await Promise.all([
       atualizarOrdemApresentacaoDb(atual.id, vizinho.ordem),
       atualizarOrdemApresentacaoDb(vizinho.id, atual.ordem),
     ]);
+  });
+
+  const compartilhar = async (ap) => {
+    const ok = await copyToClipboard(buildShareUrlNoticia(ap.id));
+    if (onToast) onToast(ok ? "Link copiado! Cole na descrição do post." : "Não consegui copiar o link");
+  };
+  const ocultar = (ap) => pedir(async () => {
+    const ok = await atualizarCamposApresentacaoDb(ap.id, { oculta: true });
+    if (!ok) { if (onToast) onToast("Não consegui esconder: rode o noticias_ct.sql no Supabase"); return; }
+    setApresentacoes((prev) => prev.map((x) => (x.id === ap.id ? { ...x, oculta: true } : x)));
+    if (onToast) onToast("Escondida. Está no Arquivo para trazer de volta.");
+  });
+  // Trazer de volta: sai do arquivo, vai para o topo e a data vira hoje
+  const trazerDeVolta = (ap) => pedir(async () => {
+    const menor = Math.min(0, ...apresentacoes.map((x) => x.ordem || 0)) - 1;
+    const hoje = dataISOLocal(new Date());
+    const ok = await atualizarCamposApresentacaoDb(ap.id, { oculta: false, data: hoje, ordem: menor });
+    if (!ok) { if (onToast) onToast("Não consegui trazer de volta: rode o noticias_ct.sql no Supabase"); return; }
+    setApresentacoes((prev) => prev.map((x) => (x.id === ap.id ? { ...x, oculta: false, data: hoje, ordem: menor } : x)).sort((p, q) => p.ordem - q.ordem));
+    if (onToast) onToast("De volta ao topo, com a data de hoje");
+  });
+  const excluirDoArquivo = (ap) => pedir(async () => {
+    if (!window.confirm(`Excluir "${ap.titulo}" de vez? Essa ação não pode ser desfeita.`)) return;
+    await excluirApresentacaoDb(ap.id);
+    setApresentacoes((prev) => prev.filter((x) => x.id !== ap.id));
+    if (onToast) onToast("Apresentação excluída");
   });
 
   const salvar = async () => {
@@ -3697,15 +3764,17 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
 
   return (
     <div>
-      {apresentacoes.map((ap, i) => (
+      {visiveis.map((ap, i) => (
         <BlocoApresentacao
           key={ap.id}
           ap={ap}
           onEditar={abrirEdicao}
           onMoverCima={(id) => mover(id, -1)}
           onMoverBaixo={(id) => mover(id, 1)}
+          onOcultar={ocultar}
+          onCompartilhar={compartilhar}
           ehPrimeiro={i === 0}
-          ehUltimo={i === apresentacoes.length - 1}
+          ehUltimo={i === visiveis.length - 1}
         />
       ))}
 
@@ -3717,15 +3786,47 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
           justifyContent: "center", gap: 6, marginBottom: 22,
         }}
       >
-        <Plus size={14} /> Adicionar apresentação do método
+        <Plus size={14} /> Nova notícia / dica / apresentação
       </button>
+
+      <button
+        onClick={() => pedir(() => setVerArquivo((v) => !v))}
+        style={{ width: "100%", background: "none", border: "none", color: "#8E8F96", fontSize: 12.5, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 14 }}
+      >
+        <EyeOff size={14} /> {verArquivo ? "Fechar arquivo" : "Arquivo (escondidas)"}
+      </button>
+      {verArquivo && (
+        <div style={{ marginBottom: 22 }}>
+          {ocultas.length === 0 && <div style={{ fontSize: 12.5, color: "#8E8F96", textAlign: "center" }}>Nada escondido por enquanto.</div>}
+          {ocultas.map((ap) => (
+            <div key={ap.id} style={{ background: "#1A1B1E", border: "1px solid #26272B", borderLeft: "3px solid #3A3B40", borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: "#8E8F96", letterSpacing: "0.08em" }}>{ap.tag || "SOBRE O MÉTODO"}{ap.data ? ` · ${dataExtensa(ap.data)}` : ""}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#F1EFE9", marginTop: 4 }}>{tituloLegivel(ap.titulo)}</div>
+              {ap.resumo && <div style={{ fontSize: 12.5, color: "#9A9BA2", marginTop: 4, lineHeight: 1.5 }}>{ap.resumo}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <PrimaryButton onClick={() => trazerDeVolta(ap)}><Eye size={14} /> Trazer de volta</PrimaryButton>
+                <GhostButton onClick={() => abrirEdicao(ap)}><Pencil size={13} /> Editar</GhostButton>
+                <GhostButton onClick={() => excluirDoArquivo(ap)} style={{ color: "#E6483F", borderColor: "#E6483F55" }}><Trash2 size={13} /> Excluir</GhostButton>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {Modal}
 
       {sheetAberto && (
         <Sheet title={editandoId ? "Editar apresentação" : "Nova apresentação"} onClose={() => setSheetAberto(false)}>
           <Field label="Etiqueta pequena (opcional)">
-            <TextInput value={form.tag || ""} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="Ex: SOBRE O MÉTODO" />
+            <TextInput value={form.tag || ""} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="Ex: DICA DO CT" />
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {TAGS_NOTICIA.map((t) => (
+                <button key={t} type="button" onClick={() => setForm({ ...form, tag: t })} style={{ cursor: "pointer", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, background: form.tag === t ? "#E4DE00" : "#1C1D20", color: form.tag === t ? "#0A0A0A" : "#B9BABF", border: `1px solid ${form.tag === t ? "#E4DE00" : "#3A3B40"}` }}>{t}</button>
+              ))}
+            </div>
+          </Field>
+          <Field label="Data da apresentação">
+            <TextInput type="date" value={form.data || ""} onChange={(e) => setForm({ ...form, data: e.target.value })} style={estiloDataHora} />
           </Field>
           <Field label="Título grande">
             <AutoTextArea
@@ -3735,7 +3836,15 @@ function ApresentacoesMetodo({ apresentacoes, setApresentacoes, senha, onToast }
               style={{ minHeight: 70 }}
             />
           </Field>
-          <Field label="Texto de apresentação">
+          <Field label={`Resumo (aparece no card e na página para compartilhar) · ${(form.resumo || "").length}/280`}>
+            <AutoTextArea
+              value={form.resumo || ""}
+              onChange={(e) => setForm({ ...form, resumo: e.target.value.slice(0, 280) })}
+              placeholder="2 ou 3 frases que fazem a pessoa querer clicar. Pensado para virar print de rede social."
+              style={{ minHeight: 80 }}
+            />
+          </Field>
+          <Field label="Texto completo">
             <AutoTextArea
               value={form.descricao}
               onChange={(e) => setForm({ ...form, descricao: e.target.value })}
@@ -4965,6 +5074,63 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
 /* =================================================================
    TELA SOMENTE-LEITURA DE PROTOCOLO (aberta via link compartilhado)
 ================================================================= */
+
+function ViewOnlyNoticia({ id, onVoltar }) {
+  const [ap, setAp] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [copiado, setCopiado] = useState(false);
+  useEffect(() => {
+    (async () => { setAp(await fetchApresentacaoById(id)); setCarregando(false); })();
+  }, [id]);
+  const fundo = { background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif" };
+  if (!ap || ap.oculta) {
+    return (
+      <div style={{ ...fundo, padding: 20 }}>
+        <style>{FONT_IMPORT}</style>
+        <div style={{ color: "#9A9BA2", textAlign: "center", marginTop: 60, fontSize: 14, lineHeight: 1.6 }}>
+          {carregando ? "Carregando..." : "Esta notícia não está disponível no momento."}
+        </div>
+        {!carregando && <GhostButton onClick={onVoltar} style={{ margin: "20px auto 0" }}><ArrowLeft size={14} /> Ir para o CANTIL</GhostButton>}
+      </div>
+    );
+  }
+  const resumo = ap.resumo || "";
+  const copiar = async () => { setCopiado(await copyToClipboard(window.location.href)); setTimeout(() => setCopiado(false), 1800); };
+  return (
+    <div style={fundo}>
+      <style>{FONT_IMPORT}</style>
+      <div style={{ maxWidth: 520, margin: "0 auto", padding: "20px 16px 60px" }}>
+        {/* Cartão pensado para print: marca, etiqueta, data, título e resumo */}
+        <div style={{ background: "linear-gradient(165deg, #1E1F23, #121315)", border: "1px solid #2E2F35", borderRadius: 18, overflow: "hidden" }}>
+          {ap.imagemUrl && <img src={ap.imagemUrl} alt="" style={{ width: "100%", height: 200, objectFit: "cover", display: "block" }} onError={(e) => { e.target.style.display = "none"; }} />}
+          <div style={{ padding: "22px 20px 22px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 28, height: 28, borderRadius: 6, background: "#E4DE00", display: "flex", alignItems: "center", justifyContent: "center" }}><Dumbbell size={16} color="#0A0A0A" /></div>
+                <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", lineHeight: 1 }}>CANTIL <span style={{ color: "#E4DE00", fontSize: 10, letterSpacing: "0.3em" }}>FITNESS</span></div>
+              </div>
+              {ap.data && <span style={{ fontSize: 12, fontWeight: 700, color: "#E4DE00", letterSpacing: "0.05em" }}>{dataExtensa(ap.data)}</span>}
+            </div>
+            <span style={{ display: "inline-block", background: "#E4DE00", color: "#0A0A0A", fontWeight: 800, fontSize: 11, letterSpacing: "0.08em", padding: "5px 12px", borderRadius: 4, textTransform: "uppercase" }}>{ap.tag || "NOTÍCIA"}</span>
+            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 30, lineHeight: 1.15, color: "#FFFFFF", marginTop: 14 }}>{tituloLegivel(ap.titulo)}</div>
+            {resumo && <div style={{ fontSize: 17, color: "#D8D9DE", lineHeight: 1.6, marginTop: 14, whiteSpace: "pre-wrap" }}>{resumo}</div>}
+          </div>
+        </div>
+
+        {ap.descricao && ap.descricao.trim() !== resumo.trim() && (
+          <div style={{ marginTop: 22 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", marginBottom: 10 }}>TEXTO COMPLETO</div>
+            <div style={{ fontSize: 15.5, color: "#E6E4DE", lineHeight: 1.75, whiteSpace: "pre-wrap" }}>{ap.descricao}</div>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 10, marginTop: 26 }}>
+          <GhostButton onClick={copiar} style={{ flex: 1 }}>{copiado ? <><Check size={14} /> Link copiado</> : <><Copy size={14} /> Copiar link</>}</GhostButton>
+          <PrimaryButton onClick={onVoltar} style={{ flex: 1 }}>Ir para o CANTIL</PrimaryButton>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ViewOnlyProtocolo({ id, onVoltar }) {
   const [p, setP] = useState(null);
@@ -6651,6 +6817,7 @@ export default function App() {
   const [viewAvaliacao, setViewAvaliacao] = useState(parseHashAvaliacao());
   const [viewResultados, setViewResultados] = useState(parseHashResultados());
   const [viewHybrid, setViewHybrid] = useState(parseHashHybrid());
+  const [viewNoticiaId, setViewNoticiaId] = useState(parseHashNoticiaId());
 
   const mostrarToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
@@ -6661,6 +6828,7 @@ export default function App() {
       setViewAvaliacao(parseHashAvaliacao());
       setViewResultados(parseHashResultados());
       setViewHybrid(parseHashHybrid());
+      setViewNoticiaId(parseHashNoticiaId());
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -6686,6 +6854,7 @@ export default function App() {
   if (viewResultados) return <ViewOnlyResultados id={viewResultados.id} resId={viewResultados.resId} legendas={legendas} />;
   if (viewAvaliacao) return <AvaliacaoPage onVoltar={() => { window.location.hash = ""; setViewAvaliacao(false); }} />;
   if (viewOnlyId) return <ProtocoloViewerProvider><ViewOnlyWorkout id={viewOnlyId} legendas={legendas} /></ProtocoloViewerProvider>;
+  if (viewNoticiaId) return <ViewOnlyNoticia id={viewNoticiaId} onVoltar={() => { window.location.hash = ""; setViewNoticiaId(null); }} />;
   if (viewOnlyProtocoloId) {
     return (
       <ViewOnlyProtocolo
