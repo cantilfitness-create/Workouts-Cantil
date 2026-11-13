@@ -619,11 +619,27 @@ const treinosDoDia = (d) => (Array.isArray(d.treinos) ? d.treinos : []);
 const diaTemConteudo = (d) => exerciciosDoDia(d).length > 0 || treinosDoDia(d).length > 0;
 // Junta textos iguais ignorando maiúsculas e acentos (para contar nos gráficos)
 const normalizarTexto = (t) => String(t || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+// Antes, se a lista de dias salva não tivesse exatamente 7 itens, TODOS os exercícios eram descartados em silêncio
+// (e sumiam das contagens). Agora cada dia é encaixado pelo nome (SEG, TER...) ou pela posição.
+function normalizarDiasSalvos(dias) {
+  if (!Array.isArray(dias) || dias.length === 0) return diasVazios();
+  if (dias.length === DIAS_SEMANA.length) return dias;
+  const saida = diasVazios();
+  dias.forEach((d, i) => {
+    let idx = DIAS_SEMANA.indexOf(normalizarTexto(d && d.dia).toUpperCase());
+    if (idx < 0) idx = DIAS_SEMANA.findIndex((x) => normalizarTexto(x) === normalizarTexto(d && d.dia));
+    if (idx < 0) idx = i;
+    if (idx >= 0 && idx < saida.length && d) {
+      saida[idx] = { ...saida[idx], ...d, dia: DIAS_SEMANA[idx], exercicios: [...exerciciosDoDia(saida[idx]), ...exerciciosDoDia(d)] };
+    }
+  });
+  return saida;
+}
 const programacaoFromDb = (r) => ({
   id: r.id, nome: r.nome || "", destaque: !!r.destaque, descricao: r.descricao || "",
   semanaInicio: r.semana_inicio || "",
   pasta: r.pasta || "",
-  dias: Array.isArray(r.dias) && r.dias.length === DIAS_SEMANA.length ? r.dias : diasVazios(),
+  dias: normalizarDiasSalvos(r.dias),
   criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
 });
 const programacaoToDb = (p) => ({ nome: p.nome || "", destaque: !!p.destaque, descricao: p.descricao || "",
@@ -2514,7 +2530,7 @@ function ResultadoSheet({ w, inicial, salvando, onSalvar, onFechar }) {
   );
 }
 
-const ACRONIMOS_TREINO = new Set(["ct", "amrap", "hiit", "emom", "mmii", "mmss", "mmi", "ktb", "wod", "rx", "hyrox", "amr"]);
+const ACRONIMOS_TREINO = new Set(["abs", "ct", "amrap", "hiit", "emom", "mmii", "mmss", "mmi", "ktb", "wod", "rx", "hyrox", "amr"]);
 // Títulos digitados todo em MAIÚSCULAS ficam em formato de título (mais fácil de ler)
 function tituloLegivel(t) {
   const s = String(t || "").trim();
@@ -4437,12 +4453,12 @@ function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, o
 }
 
 // Ranking com filtro de mês: "Todos" junta tudo; ou escolha um mês
-function GraficoRanking({ titulo, ajuda, eventos }) {
+function GraficoRanking({ titulo, ajuda, eventos, unidade = "itens", leitura = "" }) {
   const [mesSel, setMesSel] = useState("");
   const [verTodos, setVerTodos] = useState(false);
   const [tipoG, setTipoG] = useState("barras"); // barras | linha
 
-  const meses = [...new Set(eventos.map((e) => e.mes))].sort().slice(-12);
+  const meses = [...new Set(eventos.map((e) => e.mes))].sort();
   const mesAtual = meses.includes(mesSel) ? mesSel : "";
   const base = mesAtual ? eventos.filter((e) => e.mes === mesAtual) : eventos;
   const grupos = {};
@@ -4481,8 +4497,15 @@ function GraficoRanking({ titulo, ajuda, eventos }) {
           {tipoG === "barras" && (
           <div style={{ display: "flex", gap: 6, overflowX: "auto", marginTop: 10 }}>
             <button onClick={() => setMesSel("")} style={chip(mesAtual === "")}>Todos</button>
-            {meses.map((m) => <button key={m} onClick={() => setMesSel(m)} style={chip(mesAtual === m)}>{rotuloMes(m)}</button>)}
+            {meses.map((m) => <button key={m} onClick={() => setMesSel(m)} style={chip(mesAtual === m)}>{rotuloMes(m)} · {eventos.filter((e) => e.mes === m).length}</button>)}
           </div>
+          )}
+          {tipoG === "barras" && (
+            <div style={{ fontSize: 11.5, color: "#9A9BA2", marginTop: 10, lineHeight: 1.5 }}>
+              {mesAtual ? `${rotuloMes(mesAtual)}: ` : "Todos os meses: "}<b style={{ color: "#F1EFE9" }}>{base.length} {unidade}</b> em {linhas.length} {linhas.length === 1 ? "tipo" : "tipos"}
+              {!mesAtual && meses.length > 1 ? ` (soma dos meses: ${meses.map((m) => eventos.filter((e) => e.mes === m).length).join(" + ")} = ${meses.reduce((s, m) => s + eventos.filter((e) => e.mes === m).length, 0)})` : ""}
+              {leitura ? <><br />{leitura}</> : null}
+            </div>
           )}
           {tipoG === "linha" ? (() => {
             const total = {};
@@ -4530,26 +4553,37 @@ function GraficosProgramacao({ programacoes, biblioteca = [] }) {
   biblioteca.forEach((b) => variantesDe(b).forEach((v) => { const k = limparNome(v); if (k) canon[k] = b.nome; }));
   const evExercicios = [];
   const evAptidoes = [];
+  let semData = 0;
   programacoes.forEach((p) => {
     const ref = dataRefProgramacao(p);
-    if (!ref) return;
-    const mes = `${ref.getFullYear()}-${pad2(ref.getMonth() + 1)}`;
-    p.dias.forEach((d) => exerciciosDoDia(d).forEach((e) => {
-      if ((e.nome || "").trim()) evExercicios.push({ mes, rotulo: canon[limparNome(e.nome)] || e.nome.trim() });
-      if ((e.objetivo || "").trim()) evAptidoes.push({ mes, rotulo: e.objetivo.trim() });
-    }));
+    if (!ref) { semData++; return; }
+    const segunda = parseDataLocal(segundaDe(dataISOLocal(ref)));
+    p.dias.forEach((d, i) => {
+      // cada exercício conta no mês do DIA em que foi programado (semana que cruza dois meses é dividida)
+      const dia = new Date(segunda.getFullYear(), segunda.getMonth(), segunda.getDate() + i);
+      const mes = `${dia.getFullYear()}-${pad2(dia.getMonth() + 1)}`;
+      exerciciosDoDia(d).forEach((e) => {
+        if ((e.nome || "").trim()) evExercicios.push({ mes, rotulo: canon[limparNome(e.nome)] || e.nome.trim() });
+        if ((e.objetivo || "").trim()) evAptidoes.push({ mes, rotulo: e.objetivo.trim() });
+      });
+    });
   });
+  const leitura = `${programacoes.length - semData} de ${programacoes.length} programações lidas${semData ? ` · ${semData} sem data (fora da conta)` : ""}`;
   return (
     <>
       <GraficoRanking
         titulo="EXERCÍCIOS MAIS UTILIZADOS"
         ajuda="Quantas vezes cada exercício apareceu nas programações. Veja tudo junto ou escolha um mês."
         eventos={evExercicios}
+        unidade="exercícios"
+        leitura={leitura}
       />
       <GraficoRanking
         titulo="APTIDÃO MAIS DESENVOLVIDA"
         ajuda="Quantas vezes cada objetivo foi trabalhado (cardiorrespiratória, resistência, skill...)."
         eventos={evAptidoes}
+        unidade="objetivos"
+        leitura={leitura}
       />
     </>
   );
@@ -5573,6 +5607,84 @@ function AvaliacaoHome({ senha, onToast }) {
 ================================================================= */
 
 // Página compartilhada dos RESULTADOS: sem botão de voltar, sem abas, sem links. Resultados em destaque; o treino fica recolhido.
+// Texto digitado todo em MAIÚSCULAS vira frase normal (siglas e números ficam como estão)
+function suavizarCaixaAlta(t) {
+  const s = String(t || "");
+  const letras = s.replace(/[^A-Za-zÀ-ÿ]/g, "");
+  if (letras.length < 6) return s;
+  const maius = letras.replace(/[^A-ZÀ-Ý]/g, "").length;
+  if (maius / letras.length < 0.7) return s;
+  const out = s.split(/(\s+)/).map((p) => {
+    if (/\d/.test(p) || /[a-zà-ÿ]/.test(p) || !/[A-ZÀ-Ý]/.test(p)) return p;
+    const base = p.replace(/[^A-Za-zÀ-ÿ]/g, "").toLowerCase();
+    return ACRONIMOS_TREINO.has(base) ? p : p.toLowerCase();
+  }).join("");
+  return out.replace(/(^|[.!?]\s+|\n)([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase());
+}
+
+// Resultado da turma em blocos: etiqueta (ex.: DUPLAS), cartões de workout com mínimo/máximo e avisos
+function TextoResultado({ texto }) {
+  const blocos = String(texto || "").split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  const reMinMax = /m[ií]nimo\s*(.+?)\s*[-–—]\s*m[aá]ximo\s*(.+)/i;
+  return (
+    <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+      {blocos.map((bloco, i) => {
+        const linhas = bloco.split("\n").map((l) => l.trim()).filter(Boolean);
+        const mw = linhas[0].match(/^(workout\s*(\d+))\s*[-–—:]?\s*(.*)$/i);
+        if (linhas.length === 1 && linhas[0].length <= 24 && !mw) {
+          return (
+            <span key={i} style={{ alignSelf: "flex-start", background: "#E4DE00", color: "#0A0A0A", fontWeight: 800, fontSize: 12, letterSpacing: "0.08em", padding: "5px 12px", borderRadius: 999, textTransform: "uppercase" }}>
+              {linhas[0]}
+            </span>
+          );
+        }
+        if (mw) {
+          const resto = linhas.slice(1);
+          return (
+            <div key={i} style={{ background: "#1A1B1E", border: "1px solid #2E2F35", borderRadius: 14, padding: "14px 14px 14px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 10, background: "#E4DE00", color: "#0A0A0A", fontFamily: "'Outfit', sans-serif", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{mw[2]}</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em" }}>WORKOUT {mw[2]}</div>
+                  <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, color: "#FFFFFF", lineHeight: 1.2, marginTop: 2 }}>{tituloLegivel(mw[3]) || `Workout ${mw[2]}`}</div>
+                </div>
+              </div>
+              {resto.map((l, j) => {
+                const mm = l.match(reMinMax);
+                if (mm) {
+                  return (
+                    <div key={j} style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                      <div style={{ flex: 1, background: "#222328", borderRadius: 10, padding: "10px 12px" }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: "#8E8F96", letterSpacing: "0.08em" }}>MÍNIMO</div>
+                        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 21, color: "#FFFFFF", marginTop: 2 }}>{mm[1].trim()}</div>
+                      </div>
+                      <div style={{ flex: 1, background: "rgba(228,222,0,0.10)", border: "1px solid rgba(228,222,0,0.35)", borderRadius: 10, padding: "10px 12px" }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.08em" }}>MÁXIMO</div>
+                        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 21, color: "#E4DE00", marginTop: 2 }}>{mm[2].trim()}</div>
+                      </div>
+                    </div>
+                  );
+                }
+                const nota = l.startsWith("*");
+                return (
+                  <div key={j} style={{ fontSize: nota ? 13 : 15, color: nota ? "#A9AAB1" : "#E6E4DE", marginTop: 10, lineHeight: 1.55, fontStyle: nota ? "italic" : "normal" }}>
+                    {suavizarCaixaAlta(l)}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        }
+        return (
+          <div key={i} style={{ fontSize: 15.5, color: "#D8D9DE", lineHeight: 1.65, whiteSpace: "pre-wrap", padding: "0 2px" }}>
+            {suavizarCaixaAlta(bloco)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ViewOnlyResultados({ id, resId, legendas }) {
   const [w, setW] = useState(null);
   const [carregando, setCarregando] = useState(true);
@@ -5620,8 +5732,8 @@ function ViewOnlyResultados({ id, resId, legendas }) {
       <style>{FONT_IMPORT}</style>
       {topo}
       <div style={{ padding: "18px 16px 0", maxWidth: 640, margin: "0 auto" }}>
-        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 15, color: "#9A9A94", textTransform: "uppercase", letterSpacing: "0.04em" }}>{w.nome || "Treino"}</div>
-        <div style={{ fontSize: 12, color: "#8E8F96", marginTop: 3, marginBottom: 14 }}>{w.data}</div>
+        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 19, color: "#F1EFE9", lineHeight: 1.25 }}>{tituloLegivel(w.nome) || "Treino"}</div>
+        <div style={{ fontSize: 13, color: "#9A9BA2", marginTop: 4, marginBottom: 16 }}>{dataBonita(w.data)}</div>
 
         {semResultados && (
           <div style={{ background: "#1A1B1E", border: "1px dashed #3A3B40", borderRadius: 12, padding: 18, textAlign: "center", color: "#9A9A94", fontSize: 14, marginBottom: 14 }}>
@@ -5630,11 +5742,14 @@ function ViewOnlyResultados({ id, resId, legendas }) {
         )}
 
         {lista.map((r) => (
-          <div key={r.id} style={{ background: "rgba(228,222,0,0.07)", border: "1px solid rgba(228,222,0,0.4)", borderLeft: "4px solid #E4DE00", borderRadius: 12, padding: "16px 16px 18px", marginBottom: 14 }}>
-            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, color: "#E4DE00", letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.2 }}>
-              {r.rotulo || rotuloResultado(r)}
+          <div key={r.id} style={{ background: "linear-gradient(170deg, #1C1D18, #141512)", border: "1px solid rgba(228,222,0,0.28)", borderTop: "4px solid #E4DE00", borderRadius: 16, padding: "18px 16px 18px", marginBottom: 16, boxShadow: "0 6px 24px rgba(0,0,0,0.35)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Trophy size={18} color="#E4DE00" />
+              <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 19, color: "#E4DE00", lineHeight: 1.2 }}>
+                {tituloLegivel(r.rotulo || rotuloResultado(r))}
+              </span>
             </div>
-            <div style={{ marginTop: 10, fontSize: 20, fontWeight: 600, color: "#FFFFFF", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{r.texto}</div>
+            <TextoResultado texto={r.texto} />
           </div>
         ))}
 
