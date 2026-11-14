@@ -6878,11 +6878,11 @@ function buildShareUrlCT() {
 function parseHashCT() {
   return /^#\/ct\/?$/.test(window.location.hash);
 }
-function urlWhatsapp(info) {
+function urlWhatsapp(info, textoExtra) {
   let n = String(info.whatsapp || "").replace(/\D/g, "");
   if (!n) return "";
   if (n.length <= 11) n = "55" + n; // DDD + número => acrescenta o Brasil
-  return `https://wa.me/${n}?text=${encodeURIComponent(info.mensagem || "")}`;
+  return `https://wa.me/${n}?text=${encodeURIComponent(textoExtra ?? info.mensagem ?? "")}`;
 }
 function urlMapa(info) {
   if (info.mapaUrl && info.mapaUrl.trim()) return info.mapaUrl.trim();
@@ -7076,7 +7076,7 @@ function ViewOnlyCT({ onVoltar }) {
       </a>
     ) : null
   );
-  const secao = (t) => <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.14em", margin: "30px 0 12px" }}>{t}</div>;
+  const secao = (t) => <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.14em", margin: "24px 0 10px" }}>{t}</div>;
   return (
     <div style={fundo}>
       <style>{FONT_IMPORT}</style>
@@ -7099,22 +7099,50 @@ function ViewOnlyCT({ onVoltar }) {
         {info.sobre && (<>{secao("SOBRE O CT")}<div style={{ fontSize: 16, color: "#E6E4DE", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{info.sobre}</div></>)}
 
         {secao("PLANOS")}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {info.planos.map((p) => (
-            <div key={p.id} style={{ position: "relative", background: "#1A1B1E", border: p.destaque ? "2px solid #E4DE00" : "1px solid #2E2F35", borderRadius: 16, padding: "18px 16px" }}>
-              {p.destaque && <span style={{ position: "absolute", top: -11, right: 14, background: "#E4DE00", color: "#0A0A0A", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.08em", padding: "4px 10px", borderRadius: 999 }}>MAIS ESCOLHIDO</span>}
-              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 21, color: "#FFFFFF" }}>{p.nome}</div>
-              {p.preco && <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 24, color: "#E4DE00", marginTop: 4 }}>{p.preco}</div>}
-              {p.descricao && (
-                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                  {p.descricao.split("\n").filter((l) => l.trim()).map((l, i) => (
-                    <div key={i} style={{ display: "flex", gap: 8, fontSize: 15, color: "#D8D9DE", lineHeight: 1.5 }}><Check size={16} color="#E4DE00" style={{ flexShrink: 0, marginTop: 3 }} /> <span>{l.replace(/^[-•*]\s*/, "")}</span></div>
-                  ))}
+        {(() => {
+          const ehExp = (p) => p.experimental || /experimental/i.test(p.nome || "");
+          const exp = info.planos.find(ehExp);
+          const demais = info.planos.filter((p) => p !== exp);
+          const itens = (d) => String(d || "").split("\n").map((l) => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
+          return (
+            <>
+              {exp && (
+                <div style={{ background: "linear-gradient(160deg, #F4EE22, #E4DE00 55%, #CFC900)", color: "#0A0A0A", borderRadius: 20, padding: "22px 20px", marginBottom: 14, boxShadow: "0 8px 28px rgba(228,222,0,0.22)" }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.14em" }}>COMECE POR AQUI</div>
+                  <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, lineHeight: 1.05, marginTop: 6 }}>{exp.nome}</div>
+                  {exp.preco && <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, marginTop: 6 }}>{exp.preco}</div>}
+                  {itens(exp.descricao).length > 0 && (
+                    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {itens(exp.descricao).map((l, k) => (
+                        <div key={k} style={{ display: "flex", gap: 8, fontSize: 15.5, fontWeight: 600, lineHeight: 1.45 }}><Check size={17} style={{ flexShrink: 0, marginTop: 3 }} /> <span>{l}</span></div>
+                      ))}
+                    </div>
+                  )}
+                  {zap && (
+                    <a href={urlWhatsapp(info, "Olá! Quero agendar minha aula experimental no CT Cantil.")} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 16, background: "#0A0A0A", color: "#E4DE00", fontWeight: 800, fontSize: 16, borderRadius: 12, padding: "14px 16px", textDecoration: "none" }}>
+                      <IconeWhatsapp size={20} /> Agendar minha aula
+                    </a>
+                  )}
                 </div>
               )}
-            </div>
-          ))}
-        </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {demais.map((p) => {
+                  const resumo = itens(p.descricao).join(" · ");
+                  return (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, background: "#1A1B1E", border: p.destaque ? "2px solid #E4DE00" : "1px solid #2E2F35", borderRadius: 12, padding: p.destaque ? "9px 13px" : "10px 14px" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {p.destaque && <div style={{ fontSize: 9.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", marginBottom: 2 }}>★ MAIS ESCOLHIDO</div>}
+                        <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", lineHeight: 1.2 }}>{p.nome}</div>
+                        {resumo && <div style={{ fontSize: 12.5, color: "#9A9BA2", marginTop: 2, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{resumo}</div>}
+                      </div>
+                      {p.preco && <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 19, color: "#E4DE00", whiteSpace: "nowrap" }}>{p.preco}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
 
         {info.horarios.length > 0 && (<>
           {secao("HORÁRIOS DE ATENDIMENTO")}
@@ -7192,22 +7220,19 @@ function CTInfoCard({ senha, onToast }) {
   const miniBtn = { flex: 1, fontSize: 12.5, padding: "9px 8px" };
 
   return (
-    <div style={{ marginBottom: 20 }}>
+    <div style={{ marginBottom: 16 }}>
       <button onClick={() => { window.location.hash = "#/ct"; }} style={{
-        width: "100%", background: "#1A1B1E", color: "#FFFFFF", border: "1px solid #E4DE0055", borderRadius: 12, padding: "14px 14px",
-        display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "transparent", color: "#D0D1D6",
+        border: "1px solid #3A3B40", borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "center",
       }}>
-        <QrCode size={26} color="#E4DE00" />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, lineHeight: 1.15 }}>Conheça o CT · planos e horários</div>
-          <div style={{ fontSize: 12, color: "#9A9BA2", marginTop: 3 }}>Página para quem ainda não conhece, com WhatsApp</div>
-        </div>
-        <ChevronRight size={20} color="#8E8F96" style={{ marginLeft: "auto" }} />
+        <QrCode size={15} color="#E4DE00" /> CT · planos e horários
       </button>
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <GhostButton onClick={copiar} style={miniBtn}><Copy size={12} /> Link</GhostButton>
-        <GhostButton onClick={abrirQr} style={miniBtn}><Lock size={12} /> QR Code</GhostButton>
-        <GhostButton onClick={abrirEdicao} style={miniBtn}><Lock size={12} /> Editar</GhostButton>
+      <div style={{ display: "flex", justifyContent: "center", gap: 20, marginTop: 6 }}>
+        {[["Link", copiar, null], ["QR Code", abrirQr, Lock], ["Editar", abrirEdicao, Lock]].map(([t, fn, Ic]) => (
+          <button key={t} onClick={fn} style={{ background: "none", border: "none", color: "#8E8F96", fontSize: 11.5, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 2px" }}>
+            {Ic ? <Ic size={10} /> : <Copy size={10} />} {t}
+          </button>
+        ))}
       </div>
       {Modal}
 
@@ -7253,6 +7278,9 @@ function CTInfoCard({ senha, onToast }) {
               <Field label="O que inclui (uma linha por item)"><AutoTextArea value={p.descricao} onChange={(e) => upLista("planos", p.id, "descricao", e.target.value)} style={{ minHeight: 70 }} /></Field>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#B9BABF", cursor: "pointer" }}>
                 <input type="checkbox" checked={!!p.destaque} onChange={(e) => upLista("planos", p.id, "destaque", e.target.checked)} /> Destacar como "Mais escolhido"
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#B9BABF", cursor: "pointer", marginTop: 8 }}>
+                <input type="checkbox" checked={!!p.experimental} onChange={(e) => upLista("planos", p.id, "experimental", e.target.checked)} /> Aula experimental (card grande no topo)
               </label>
             </div>
           ))}
