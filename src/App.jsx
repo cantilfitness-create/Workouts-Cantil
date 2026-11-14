@@ -5,7 +5,7 @@ import {
   Users, Lock, Save, Layers, Target, Share2, Check, ArrowLeft,
   PlayCircle, Link as LinkIcon, Megaphone, KeyRound, Star, BookOpen, Sparkles, CalendarDays,
   ClipboardList, AlertCircle, BarChart3, Copy, Folder, SlidersHorizontal, FlaskConical,
-  Activity, Trophy, Unlock, Eye, EyeOff
+  Activity, Trophy, Unlock, Eye, EyeOff, MapPin, QrCode
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -6850,6 +6850,440 @@ function PastaHybridCard({ senha, pedir, onToast }) {
 
 
 /* =================================================================
+   CT CANTIL · página de apresentação (planos, horários, WhatsApp) + QR Code
+   Link público: #/ct  ·  Conteúdo editável pelo treinador (tabela ct_info)
+================================================================= */
+
+const CT_INFO_PADRAO = {
+  titulo: "CT CANTIL",
+  chamada: "Treino funcional e híbrido para todos os níveis.",
+  sobre: "Aulas em grupo, acompanhamento de perto e uma comunidade que treina junto. Veja os planos e horários abaixo e fale com a gente pelo WhatsApp.",
+  planos: [
+    { id: "p1", nome: "Aula experimental", preco: "Fale com a gente", descricao: "Venha conhecer o CT e fazer um treino com a turma.", destaque: false },
+    { id: "p2", nome: "Plano mensal", preco: "Consulte os valores", descricao: "Acesso às aulas do CT durante o mês.", destaque: true },
+  ],
+  horarios: [{ id: "h1", dia: "Consulte", horas: "Horários de atendimento em breve" }],
+  endereco: "",
+  mapaUrl: "",
+  whatsapp: "",
+  mensagem: "Olá! Vi o QR Code do CT Cantil e gostaria de saber mais sobre os planos.",
+  instagram: "",
+  qrLink: "",
+};
+
+function buildShareUrlCT() {
+  const { origin, pathname } = window.location;
+  return `${origin}${pathname}#/ct`;
+}
+function parseHashCT() {
+  return /^#\/ct\/?$/.test(window.location.hash);
+}
+function urlWhatsapp(info) {
+  let n = String(info.whatsapp || "").replace(/\D/g, "");
+  if (!n) return "";
+  if (n.length <= 11) n = "55" + n; // DDD + número => acrescenta o Brasil
+  return `https://wa.me/${n}?text=${encodeURIComponent(info.mensagem || "")}`;
+}
+function urlMapa(info) {
+  if (info.mapaUrl && info.mapaUrl.trim()) return info.mapaUrl.trim();
+  if (info.endereco && info.endereco.trim()) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(info.endereco.trim())}`;
+  return "";
+}
+async function fetchCtInfo() {
+  const { data, error } = await supabase.from("ct_info").select("dados").eq("id", 1).maybeSingle();
+  if (error) { console.error(error); return { info: CT_INFO_PADRAO, ok: false }; }
+  return { info: { ...CT_INFO_PADRAO, ...((data && data.dados) || {}) }, ok: true };
+}
+async function salvarCtInfoDb(info) {
+  const { error } = await supabase.from("ct_info").upsert({ id: 1, dados: info, atualizado_em: new Date().toISOString() });
+  if (error) { console.error(error); return false; }
+  return true;
+}
+
+/* ---------------------------- QR Code (gerador próprio, sem biblioteca) ---------------------------- */
+// ---- Gerador de QR Code (nível de correção M, versões 1 a 10, modo bytes/UTF-8) ----
+function qrMatriz(texto, forca) {
+  const bytes = Array.from(new TextEncoder().encode(String(texto)));
+  const ECC = [10, 16, 26, 18, 24, 16, 18, 22, 22, 26]; // códigos de correção por bloco (versão 1..10)
+  const BLK = [1, 1, 1, 2, 2, 4, 4, 4, 5, 5]; // blocos (versão 1..10)
+  const bruto = (v) => {
+    let r = (16 * v + 128) * v + 64;
+    if (v >= 2) { const n = Math.floor(v / 7) + 2; r -= (25 * n - 10) * n - 55; if (v >= 7) r -= 36; }
+    return r;
+  };
+  const dadosCap = (v) => Math.floor(bruto(v) / 8) - ECC[v - 1] * BLK[v - 1];
+  let ver = 0;
+  for (let v = 1; v <= 10; v++) {
+    if (4 + (v < 10 ? 8 : 16) + 8 * bytes.length <= dadosCap(v) * 8) { ver = v; break; }
+  }
+  if (!ver) throw new Error("Link longo demais para o QR Code");
+  // bits de dados
+  const bits = [];
+  const poe = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+  poe(4, 4); poe(bytes.length, ver < 10 ? 8 : 16);
+  bytes.forEach((b) => poe(b, 8));
+  const capBits = dadosCap(ver) * 8;
+  poe(0, Math.min(4, capBits - bits.length));
+  while (bits.length % 8) bits.push(0);
+  for (let pad = 0xec; bits.length < capBits; pad ^= 0xec ^ 0x11) poe(pad, 8);
+  const dados = [];
+  for (let i = 0; i < bits.length; i += 8) dados.push(parseInt(bits.slice(i, i + 8).join(""), 2));
+  // Reed-Solomon
+  const mul = (x, y) => { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11d); z ^= ((y >>> i) & 1) * x; } return z; };
+  const divisor = (grau) => {
+    const r = new Array(grau).fill(0); r[grau - 1] = 1; let raiz = 1;
+    for (let i = 0; i < grau; i++) {
+      for (let j = 0; j < r.length; j++) { r[j] = mul(r[j], raiz); if (j + 1 < r.length) r[j] ^= r[j + 1]; }
+      raiz = mul(raiz, 2);
+    }
+    return r;
+  };
+  const resto = (dat, div) => {
+    const r = new Array(div.length).fill(0);
+    dat.forEach((b) => { const f = b ^ r.shift(); r.push(0); div.forEach((c, i) => { r[i] ^= mul(c, f); }); });
+    return r;
+  };
+  const nBlocos = BLK[ver - 1], eccLen = ECC[ver - 1];
+  const brutoCw = Math.floor(bruto(ver) / 8);
+  const nCurtos = nBlocos - (brutoCw % nBlocos), lenCurto = Math.floor(brutoCw / nBlocos);
+  const div = divisor(eccLen);
+  const blocos = [];
+  for (let i = 0, k = 0; i < nBlocos; i++) {
+    const n = lenCurto - eccLen + (i < nCurtos ? 0 : 1);
+    const dat = dados.slice(k, k + n); k += n;
+    const ecc = resto(dat, div);
+    if (i < nCurtos) dat.push(0);
+    blocos.push(dat.concat(ecc));
+  }
+  const final = [];
+  for (let i = 0; i < blocos[0].length; i++) {
+    blocos.forEach((b, j) => { if (i !== lenCurto - eccLen || j >= nCurtos) final.push(b[i]); });
+  }
+  // matriz
+  const size = ver * 4 + 17;
+  const mod = Array.from({ length: size }, () => new Array(size).fill(false));
+  const fn = Array.from({ length: size }, () => new Array(size).fill(false));
+  const set = (x, y, v) => { mod[y][x] = v; fn[y][x] = true; };
+  for (let i = 0; i < size; i++) { set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+  const finder = (x, y) => {
+    for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+      const d = Math.max(Math.abs(dx), Math.abs(dy)), xx = x + dx, yy = y + dy;
+      if (xx >= 0 && xx < size && yy >= 0 && yy < size) set(xx, yy, d !== 2 && d !== 4);
+    }
+  };
+  finder(3, 3); finder(size - 4, 3); finder(3, size - 4);
+  const nAl = ver === 1 ? 0 : Math.floor(ver / 7) + 2;
+  const pos = [];
+  if (nAl) {
+    const passo = ver === 32 ? 26 : Math.ceil((ver * 4 + 4) / (nAl * 2 - 2)) * 2;
+    pos.push(6);
+    for (let p = size - 7, c = 1; c < nAl; p -= passo, c++) pos.splice(1, 0, p);
+  }
+  pos.forEach((px, i) => pos.forEach((py, j) => {
+    if ((i === 0 && j === 0) || (i === 0 && j === nAl - 1) || (i === nAl - 1 && j === 0)) return;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) set(px + dx, py + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+  }));
+  const formato = (mask) => {
+    const d = (0 << 3) | mask; // nível M = 0
+    let r = d; for (let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+    const b = ((d << 10) | r) ^ 0x5412;
+    const bit = (i) => ((b >>> i) & 1) !== 0;
+    for (let i = 0; i <= 5; i++) set(8, i, bit(i));
+    set(8, 7, bit(6)); set(8, 8, bit(7)); set(7, 8, bit(8));
+    for (let i = 9; i < 15; i++) set(14 - i, 8, bit(i));
+    for (let i = 0; i < 8; i++) set(size - 1 - i, 8, bit(i));
+    for (let i = 8; i < 15; i++) set(8, size - 15 + i, bit(i));
+    set(8, size - 8, true);
+  };
+  formato(0);
+  if (ver >= 7) {
+    let r = ver; for (let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1f25);
+    const b = (ver << 12) | r;
+    for (let i = 0; i < 18; i++) { const c = ((b >>> i) & 1) !== 0, a = size - 11 + (i % 3), q = Math.floor(i / 3); set(a, q, c); set(q, a, c); }
+  }
+  // dados em zigue-zague
+  let k = 0;
+  for (let dir = size - 1; dir >= 1; dir -= 2) {
+    if (dir === 6) dir = 5;
+    for (let v = 0; v < size; v++) for (let j = 0; j < 2; j++) {
+      const x = dir - j, y = ((dir + 1) & 2) === 0 ? size - 1 - v : v;
+      if (!fn[y][x] && k < final.length * 8) { mod[y][x] = ((final[k >>> 3] >>> (7 - (k & 7))) & 1) !== 0; k++; }
+    }
+  }
+  // máscara: escolhe a de menor penalidade
+  const inverte = [
+    (x, y) => (x + y) % 2 === 0, (x, y) => y % 2 === 0, (x, y) => x % 3 === 0, (x, y) => (x + y) % 3 === 0,
+    (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0, (x, y) => ((x * y) % 2) + ((x * y) % 3) === 0,
+    (x, y) => (((x * y) % 2) + ((x * y) % 3)) % 2 === 0, (x, y) => (((x + y) % 2) + ((x * y) % 3)) % 2 === 0,
+  ];
+  const aplica = (m) => { for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (!fn[y][x] && inverte[m](x, y)) mod[y][x] = !mod[y][x]; };
+  const penal = () => {
+    let p = 0;
+    const linhas = [mod, Array.from({ length: size }, (_, x) => mod.map((r) => r[x]))];
+    linhas.forEach((grade) => grade.forEach((r) => {
+      let run = 1;
+      for (let i = 1; i <= size; i++) {
+        if (i < size && r[i] === r[i - 1]) run++; else { if (run >= 5) p += 3 + (run - 5); run = 1; }
+      }
+      const s = r.map((c) => (c ? "1" : "0")).join("");
+      for (let i = 0; i + 11 <= size; i++) { const t = s.slice(i, i + 11); if (t === "10111010000" || t === "00001011101") p += 40; }
+    }));
+    for (let y = 0; y < size - 1; y++) for (let x = 0; x < size - 1; x++) if (mod[y][x] === mod[y][x + 1] && mod[y][x] === mod[y + 1][x] && mod[y][x] === mod[y + 1][x + 1]) p += 3;
+    const escuros = mod.reduce((s, r) => s + r.filter(Boolean).length, 0);
+    p += (Math.ceil(Math.abs(escuros * 20 - size * size * 10) / (size * size)) - 1) * 10;
+    return p;
+  };
+  let melhor = 0, melhorP = Infinity;
+  for (let m = 0; m < 8; m++) { aplica(m); formato(m); const p = penal(); if (p < melhorP) { melhor = m; melhorP = p; } aplica(m); }
+  const esc = forca == null ? melhor : forca; aplica(esc); formato(esc);
+  return mod;
+}
+
+// Gera o PNG do QR Code (com margem branca) e devolve como data URL
+function qrParaPng(texto, escala = 12) {
+  const m = qrMatriz(texto);
+  const borda = 4;
+  const lado = (m.length + borda * 2) * escala;
+  const c = document.createElement("canvas");
+  c.width = lado; c.height = lado;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, lado, lado);
+  ctx.fillStyle = "#000000";
+  m.forEach((linha, y) => linha.forEach((v, x) => { if (v) ctx.fillRect((x + borda) * escala, (y + borda) * escala, escala, escala); }));
+  return c.toDataURL("image/png");
+}
+
+const IconeWhatsapp = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M20.5 3.5A11.4 11.4 0 0 0 2.3 17.3L1 23l5.9-1.5A11.4 11.4 0 0 0 23 12c0-3-1.2-5.9-2.5-8.5zM12 21a9.4 9.4 0 0 1-4.8-1.3l-.3-.2-3.5.9.9-3.4-.2-.4A9.4 9.4 0 1 1 12 21zm5.2-7c-.3-.1-1.7-.8-1.9-.9-.3-.1-.5-.1-.7.1l-.9 1.1c-.2.2-.3.2-.6.1a7.7 7.7 0 0 1-3.8-3.3c-.3-.5.3-.5.8-1.5.1-.2 0-.4 0-.5l-.9-2c-.2-.5-.4-.4-.7-.4h-.6a1.2 1.2 0 0 0-.9.4 3.6 3.6 0 0 0-1.1 2.7 6.2 6.2 0 0 0 1.3 3.3 14 14 0 0 0 5.4 4.8c2 .8 2.8.9 3.8.7a3.2 3.2 0 0 0 2.1-1.5 2.6 2.6 0 0 0 .2-1.5c-.1-.1-.3-.2-.6-.3z" />
+  </svg>
+);
+
+/* ---------------------------- página pública ---------------------------- */
+function ViewOnlyCT({ onVoltar }) {
+  const [info, setInfo] = useState(null);
+  useEffect(() => { (async () => setInfo((await fetchCtInfo()).info))(); }, []);
+  const fundo = { background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif" };
+  if (!info) return <div style={{ ...fundo, padding: 30, color: "#9A9BA2", textAlign: "center" }}><style>{FONT_IMPORT}</style>Carregando...</div>;
+  const zap = urlWhatsapp(info);
+  const mapa = urlMapa(info);
+  const insta = String(info.instagram || "").replace(/^@/, "").trim();
+  const botaoZap = (
+    zap ? (
+      <a href={zap} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#25D366", color: "#06240F", fontWeight: 800, fontSize: 17, borderRadius: 14, padding: "16px 18px", textDecoration: "none", boxShadow: "0 6px 20px rgba(37,211,102,0.25)" }}>
+        <IconeWhatsapp size={24} /> Falar no WhatsApp
+      </a>
+    ) : null
+  );
+  const secao = (t) => <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.14em", margin: "30px 0 12px" }}>{t}</div>;
+  return (
+    <div style={fundo}>
+      <style>{FONT_IMPORT}</style>
+      <div style={{ maxWidth: 520, margin: "0 auto", padding: "22px 16px 60px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 9, background: "#E4DE00", display: "flex", alignItems: "center", justifyContent: "center" }}><Dumbbell size={22} color="#0A0A0A" /></div>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, color: "#FFFFFF", lineHeight: 1 }}>CANTIL <span style={{ display: "block", color: "#E4DE00", fontSize: 10, letterSpacing: "0.38em", marginTop: 3 }}>FITNESS</span></div>
+        </div>
+
+        <div style={{ background: "linear-gradient(165deg, #20211A, #121315)", border: "1px solid rgba(228,222,0,0.3)", borderTop: "4px solid #E4DE00", borderRadius: 18, padding: "24px 20px" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.12em" }}>BEM-VINDO AO</div>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 36, color: "#FFFFFF", lineHeight: 1.05, marginTop: 6 }}>{info.titulo}</div>
+          <div style={{ fontSize: 17, color: "#D8D9DE", lineHeight: 1.55, marginTop: 12 }}>{info.chamada}</div>
+          <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+            {botaoZap}
+            {mapa && <a href={mapa} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "1px solid #3A3B40", color: "#F1EFE9", fontWeight: 700, fontSize: 15, borderRadius: 14, padding: "13px 16px", textDecoration: "none" }}><MapPin size={18} color="#E4DE00" /> Como chegar</a>}
+          </div>
+        </div>
+
+        {info.sobre && (<>{secao("SOBRE O CT")}<div style={{ fontSize: 16, color: "#E6E4DE", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{info.sobre}</div></>)}
+
+        {secao("PLANOS")}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {info.planos.map((p) => (
+            <div key={p.id} style={{ position: "relative", background: "#1A1B1E", border: p.destaque ? "2px solid #E4DE00" : "1px solid #2E2F35", borderRadius: 16, padding: "18px 16px" }}>
+              {p.destaque && <span style={{ position: "absolute", top: -11, right: 14, background: "#E4DE00", color: "#0A0A0A", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.08em", padding: "4px 10px", borderRadius: 999 }}>MAIS ESCOLHIDO</span>}
+              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 21, color: "#FFFFFF" }}>{p.nome}</div>
+              {p.preco && <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 24, color: "#E4DE00", marginTop: 4 }}>{p.preco}</div>}
+              {p.descricao && (
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {p.descricao.split("\n").filter((l) => l.trim()).map((l, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8, fontSize: 15, color: "#D8D9DE", lineHeight: 1.5 }}><Check size={16} color="#E4DE00" style={{ flexShrink: 0, marginTop: 3 }} /> <span>{l.replace(/^[-•*]\s*/, "")}</span></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {info.horarios.length > 0 && (<>
+          {secao("HORÁRIOS DE ATENDIMENTO")}
+          <div style={{ background: "#1A1B1E", border: "1px solid #2E2F35", borderRadius: 16, padding: "6px 16px" }}>
+            {info.horarios.map((h, i) => (
+              <div key={h.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "13px 0", borderTop: i ? "1px solid #26272B" : "none", fontSize: 15 }}>
+                <span style={{ color: "#F1EFE9", fontWeight: 700 }}>{h.dia}</span>
+                <span style={{ color: "#E4DE00", fontWeight: 700, textAlign: "right" }}>{h.horas}</span>
+              </div>
+            ))}
+          </div>
+        </>)}
+
+        {info.endereco && (<>
+          {secao("ONDE FICA")}
+          <div style={{ fontSize: 16, color: "#E6E4DE", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{info.endereco}</div>
+        </>)}
+
+        <div style={{ marginTop: 30, display: "flex", flexDirection: "column", gap: 10 }}>
+          {botaoZap}
+          {insta && <a href={`https://instagram.com/${insta}`} target="_blank" rel="noreferrer" style={{ textAlign: "center", color: "#B9BABF", fontSize: 14, fontWeight: 600, textDecoration: "none", padding: 8 }}>Instagram @{insta}</a>}
+          {!zap && <div style={{ textAlign: "center", color: "#8E8F96", fontSize: 13 }}>Em breve: contato pelo WhatsApp.</div>}
+        </div>
+        <button onClick={onVoltar} style={{ display: "block", margin: "26px auto 0", background: "none", border: "none", color: "#8E8F96", fontSize: 12.5, cursor: "pointer", textDecoration: "underline" }}>Ver os treinos do CANTIL</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------- cartão do treinador: abrir, link, QR e edição ---------------------------- */
+function CTInfoCard({ senha, onToast }) {
+  const { pedir, Modal } = useSenhaGate(senha);
+  const [info, setInfo] = useState(null);
+  const [editando, setEditando] = useState(null); // cópia do info em edição
+  const [qrAberto, setQrAberto] = useState(false);
+  const [qrLink, setQrLink] = useState("");
+  const [png, setPng] = useState("");
+  const [erroQr, setErroQr] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const carregar = async () => { const r = await fetchCtInfo(); setInfo(r.info); return r.info; };
+  useEffect(() => { carregar(); }, []);
+
+  useEffect(() => {
+    if (!qrAberto) return;
+    try { setPng(qrParaPng((qrLink || "").trim() || buildShareUrlCT())); setErroQr(""); } catch (e) { setPng(""); setErroQr(e.message || "Não foi possível gerar o QR Code"); }
+  }, [qrAberto, qrLink]);
+
+  const copiar = async () => onToast((await copyToClipboard(buildShareUrlCT())) ? "Link do CT copiado" : "Não foi possível copiar");
+  const abrirQr = () => pedir(async () => {
+    const i = info || (await carregar());
+    setQrLink(i.qrLink || buildShareUrlCT());
+    setQrAberto(true);
+  });
+  const abrirEdicao = () => pedir(async () => {
+    const i = info || (await carregar());
+    setEditando(JSON.parse(JSON.stringify(i)));
+  });
+  const salvarQrLink = async () => {
+    const novo = { ...(info || CT_INFO_PADRAO), qrLink: qrLink.trim() === buildShareUrlCT() ? "" : qrLink.trim() };
+    const ok = await salvarCtInfoDb(novo);
+    if (ok) setInfo(novo);
+    onToast(ok ? "Link do QR salvo" : "Não consegui salvar: rode o ct_info.sql no Supabase");
+  };
+  const salvar = async () => {
+    setSalvando(true);
+    const ok = await salvarCtInfoDb(editando);
+    setSalvando(false);
+    if (ok) { setInfo(editando); setEditando(null); onToast("Página do CT atualizada"); }
+    else onToast("Não consegui salvar: rode o ct_info.sql no Supabase");
+  };
+  const up = (campo, v) => setEditando({ ...editando, [campo]: v });
+  const upLista = (campo, id, k, v) => setEditando({ ...editando, [campo]: editando[campo].map((x) => (x.id === id ? { ...x, [k]: v } : x)) });
+  const rmLista = (campo, id) => setEditando({ ...editando, [campo]: editando[campo].filter((x) => x.id !== id) });
+  const miniBtn = { flex: 1, fontSize: 12.5, padding: "9px 8px" };
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <button onClick={() => { window.location.hash = "#/ct"; }} style={{
+        width: "100%", background: "#1A1B1E", color: "#FFFFFF", border: "1px solid #E4DE0055", borderRadius: 12, padding: "14px 14px",
+        display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left",
+      }}>
+        <QrCode size={26} color="#E4DE00" />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, lineHeight: 1.15 }}>Conheça o CT · planos e horários</div>
+          <div style={{ fontSize: 12, color: "#9A9BA2", marginTop: 3 }}>Página para quem ainda não conhece, com WhatsApp</div>
+        </div>
+        <ChevronRight size={20} color="#8E8F96" style={{ marginLeft: "auto" }} />
+      </button>
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <GhostButton onClick={copiar} style={miniBtn}><Copy size={12} /> Link</GhostButton>
+        <GhostButton onClick={abrirQr} style={miniBtn}><Lock size={12} /> QR Code</GhostButton>
+        <GhostButton onClick={abrirEdicao} style={miniBtn}><Lock size={12} /> Editar</GhostButton>
+      </div>
+      {Modal}
+
+      {qrAberto && (
+        <Sheet title="QR Code do CT" onClose={() => setQrAberto(false)}>
+          <div style={{ fontSize: 12.5, color: "#B9BABF", lineHeight: 1.5, marginBottom: 12 }}>
+            Quem ler com a câmera do celular abre a página com planos, horários e WhatsApp. Imprima e cole no CT, ou use em posts e stories.
+          </div>
+          <Field label="Link do QR Code (pode trocar pelo que preferir)">
+            <TextInput value={qrLink} onChange={(e) => setQrLink(e.target.value)} placeholder={buildShareUrlCT()} />
+          </Field>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            <GhostButton onClick={() => setQrLink(buildShareUrlCT())} style={miniBtn}>Usar a página do CT</GhostButton>
+            <GhostButton onClick={salvarQrLink} style={miniBtn}><Save size={12} /> Guardar esse link</GhostButton>
+          </div>
+          {erroQr ? <div style={{ color: "#E6483F", fontSize: 13 }}>{erroQr}</div> : png && (
+            <div style={{ textAlign: "center" }}>
+              <img src={png} alt="QR Code" style={{ width: "100%", maxWidth: 300, borderRadius: 12, background: "#FFFFFF" }} />
+              <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 8 }}>No iPhone, também dá para segurar o dedo sobre a imagem e escolher "Salvar na Fotos".</div>
+              <a href={png} download="qr-ct-cantil.png" style={{ textDecoration: "none" }}>
+                <PrimaryButton style={{ width: "100%", marginTop: 12 }}><Share2 size={15} /> Baixar imagem do QR Code</PrimaryButton>
+              </a>
+            </div>
+          )}
+        </Sheet>
+      )}
+
+      {editando && (
+        <Sheet title="Editar página do CT" onClose={() => setEditando(null)}>
+          <Field label="Nome do CT"><TextInput value={editando.titulo} onChange={(e) => up("titulo", e.target.value)} /></Field>
+          <Field label="Frase de destaque"><TextInput value={editando.chamada} onChange={(e) => up("chamada", e.target.value)} /></Field>
+          <Field label="Sobre o CT"><AutoTextArea value={editando.sobre} onChange={(e) => up("sobre", e.target.value)} style={{ minHeight: 90 }} /></Field>
+
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", margin: "18px 0 8px" }}>PLANOS</div>
+          {editando.planos.map((p, i) => (
+            <div key={p.id} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <Badge>Plano {i + 1}</Badge>
+                <Trash2 size={16} color="#E6483F" style={{ cursor: "pointer" }} onClick={() => rmLista("planos", p.id)} />
+              </div>
+              <Field label="Nome"><TextInput value={p.nome} onChange={(e) => upLista("planos", p.id, "nome", e.target.value)} placeholder="Ex: Plano mensal" /></Field>
+              <Field label="Valor"><TextInput value={p.preco} onChange={(e) => upLista("planos", p.id, "preco", e.target.value)} placeholder="Ex: R$ 150/mês" /></Field>
+              <Field label="O que inclui (uma linha por item)"><AutoTextArea value={p.descricao} onChange={(e) => upLista("planos", p.id, "descricao", e.target.value)} style={{ minHeight: 70 }} /></Field>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#B9BABF", cursor: "pointer" }}>
+                <input type="checkbox" checked={!!p.destaque} onChange={(e) => upLista("planos", p.id, "destaque", e.target.checked)} /> Destacar como "Mais escolhido"
+              </label>
+            </div>
+          ))}
+          <GhostButton onClick={() => setEditando({ ...editando, planos: [...editando.planos, { id: uid(), nome: "", preco: "", descricao: "", destaque: false }] })} style={{ width: "100%" }}><Plus size={15} /> Adicionar plano</GhostButton>
+
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", margin: "22px 0 8px" }}>HORÁRIOS DE ATENDIMENTO</div>
+          {editando.horarios.map((h) => (
+            <div key={h.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <TextInput value={h.dia} onChange={(e) => upLista("horarios", h.id, "dia", e.target.value)} placeholder="Segunda a sexta" style={{ flex: 1 }} />
+              <TextInput value={h.horas} onChange={(e) => upLista("horarios", h.id, "horas", e.target.value)} placeholder="06h às 09h" style={{ flex: 1 }} />
+              <Trash2 size={16} color="#E6483F" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => rmLista("horarios", h.id)} />
+            </div>
+          ))}
+          <GhostButton onClick={() => setEditando({ ...editando, horarios: [...editando.horarios, { id: uid(), dia: "", horas: "" }] })} style={{ width: "100%" }}><Plus size={15} /> Adicionar horário</GhostButton>
+
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", margin: "22px 0 8px" }}>CONTATO E LOCAL</div>
+          <Field label="WhatsApp (com DDD)"><TextInput inputMode="tel" value={editando.whatsapp} onChange={(e) => up("whatsapp", e.target.value)} placeholder="Ex: 21 99999-9999" /></Field>
+          <Field label="Mensagem pronta que aparece no WhatsApp"><AutoTextArea value={editando.mensagem} onChange={(e) => up("mensagem", e.target.value)} style={{ minHeight: 70 }} /></Field>
+          <Field label="Endereço"><AutoTextArea value={editando.endereco} onChange={(e) => up("endereco", e.target.value)} placeholder="Rua, número, bairro" style={{ minHeight: 60 }} /></Field>
+          <Field label="Link do Google Maps (opcional)"><TextInput value={editando.mapaUrl} onChange={(e) => up("mapaUrl", e.target.value)} placeholder="Se vazio, usa o endereço acima" /></Field>
+          <Field label="Instagram (opcional)"><TextInput value={editando.instagram} onChange={(e) => up("instagram", e.target.value)} placeholder="@seuperfil" /></Field>
+
+          <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%", marginTop: 8 }}><Save size={16} /> {salvando ? "Salvando..." : "Salvar página do CT"}</PrimaryButton>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+
+/* =================================================================
    APP ROOT
 ================================================================= */
 
@@ -6933,6 +7367,7 @@ export default function App() {
   const [viewResultados, setViewResultados] = useState(parseHashResultados());
   const [viewHybrid, setViewHybrid] = useState(parseHashHybrid());
   const [viewNoticiaId, setViewNoticiaId] = useState(parseHashNoticiaId());
+  const [viewCT, setViewCT] = useState(parseHashCT());
 
   const mostrarToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
@@ -6944,6 +7379,7 @@ export default function App() {
       setViewResultados(parseHashResultados());
       setViewHybrid(parseHashHybrid());
       setViewNoticiaId(parseHashNoticiaId());
+      setViewCT(parseHashCT());
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -6969,6 +7405,7 @@ export default function App() {
   if (viewResultados) return <ViewOnlyResultados id={viewResultados.id} resId={viewResultados.resId} legendas={legendas} />;
   if (viewAvaliacao) return <AvaliacaoPage onVoltar={() => { window.location.hash = ""; setViewAvaliacao(false); }} />;
   if (viewOnlyId) return <ProtocoloViewerProvider><ViewOnlyWorkout id={viewOnlyId} legendas={legendas} /></ProtocoloViewerProvider>;
+  if (viewCT) return <ViewOnlyCT onVoltar={() => { window.location.hash = ""; setViewCT(false); }} />;
   if (viewNoticiaId) return <ViewOnlyNoticia id={viewNoticiaId} onVoltar={() => { window.location.hash = ""; setViewNoticiaId(null); }} />;
   if (viewOnlyProtocoloId) {
     return (
@@ -7026,6 +7463,7 @@ export default function App() {
             {aba === "protocolos" && (
               <>
                 <AvaliacaoHome senha={senha} onToast={mostrarToast} />
+                <CTInfoCard senha={senha} onToast={mostrarToast} />
                 <ProtocolosTab senha={senha} onToast={mostrarToast} />
               </>
             )}
