@@ -718,6 +718,38 @@ async function atualizarProgramacaoDb(id, p) {
   const payload = { ...programacaoToDb(p), atualizado_em: new Date().toISOString() };
   return gravarProgramacao((d) => supabase.from("programacoes_semanais").update(d).eq("id", id).select().single(), payload);
 }
+// Ajustes de nomes nos gráficos (ocultar ou renomear/unir). Tabela grafico_ajustes (grafico_ajustes.sql)
+async function fetchGraficoAjustes() {
+  const { data, error } = await supabase.from("grafico_ajustes").select("*");
+  if (error) { console.error(error); return {}; }
+  const m = {};
+  (data || []).forEach((r) => { m[r.chave] = { chave: r.chave, tipo: r.tipo, original: r.original, acao: r.acao, destino: r.destino || "" }; });
+  return m;
+}
+async function salvarGraficoAjusteDb(tipo, original, acao, destino) {
+  const chave = `${tipo}|${normalizarTexto(original)}`;
+  const { error } = await supabase.from("grafico_ajustes").upsert({ chave, tipo, original, acao, destino: destino || "", atualizado_em: new Date().toISOString() });
+  if (error) { console.error(error); return null; }
+  return { chave, tipo, original, acao, destino: destino || "" };
+}
+async function removerGraficoAjusteDb(chave) {
+  const { error } = await supabase.from("grafico_ajustes").delete().eq("chave", chave);
+  if (error) { console.error(error); return false; }
+  return true;
+}
+// Aplica as regras: devolve o nome final, ou null se o item foi tirado do gráfico
+function aplicarAjusteGrafico(ajustes, tipo, rotulo) {
+  let r = rotulo;
+  for (let i = 0; i < 3; i++) {
+    const aj = ajustes[`${tipo}|${normalizarTexto(r)}`];
+    if (!aj) break;
+    if (aj.acao === "ocultar") return null;
+    if (aj.acao === "renomear" && aj.destino && normalizarTexto(aj.destino) !== normalizarTexto(r)) r = aj.destino;
+    else break;
+  }
+  return r;
+}
+
 // Acesso de cada pasta: "aberta" (qualquer um entra) ou "senha". Tabela pasta_config (pastas_config.sql)
 async function fetchPastasConfig() {
   const { data, error } = await supabase.from("pasta_config").select("*");
@@ -4453,7 +4485,10 @@ function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, o
 }
 
 // Ranking com filtro de mês: "Todos" junta tudo; ou escolha um mês
-function GraficoRanking({ titulo, ajuda, eventos, unidade = "itens", leitura = "" }) {
+function GraficoRanking({ titulo, ajuda, eventos, unidade = "itens", leitura = "", tipo = "exercicio", ajustes = {}, onAjustar, onDesfazer, onCorrigir, ocultos = 0 }) {
+  const [itemAberto, setItemAberto] = useState(null); // rótulo normalizado do item aberto
+  const [gerenciar, setGerenciar] = useState(false);
+  const [destinoTxt, setDestinoTxt] = useState("");
   const [mesSel, setMesSel] = useState("");
   const [verTodos, setVerTodos] = useState(false);
   const [tipoG, setTipoG] = useState("barras"); // barras | linha
@@ -4482,9 +4517,12 @@ function GraficoRanking({ titulo, ajuda, eventos, unidade = "itens", leitura = "
     <div style={{ background: "#1A1B1E", border: "1px solid #26272B", borderRadius: 12, padding: "14px 16px", marginTop: 18 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <BarChart3 size={18} color="#E4DE00" />
-        <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.05em" }}>{titulo}</span>
+        <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", letterSpacing: "0.05em", flex: 1 }}>{titulo}</span>
+        <button onClick={() => setGerenciar(true)} style={{ background: "none", border: "1px solid #3A3B40", borderRadius: 999, color: "#B9BABF", fontSize: 11.5, fontWeight: 700, padding: "4px 10px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <SlidersHorizontal size={12} /> Ajustar nomes
+        </button>
       </div>
-      <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 4, lineHeight: 1.4 }}>{ajuda}</div>
+      <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 4, lineHeight: 1.4 }}>{ajuda} Toque em um item para ver os dias e corrigir.</div>
 
       {eventos.length === 0 ? (
         <div style={{ fontSize: 12.5, color: "#9A9A94", marginTop: 14 }}>Ainda sem dados. Monte uma programação para começar.</div>
@@ -4523,11 +4561,12 @@ function GraficoRanking({ titulo, ajuda, eventos, unidade = "itens", leitura = "
             );
           })() : (<>
           {visiveis.map((l, idx) => (
-            <div key={l.rotulo} style={{ marginTop: 10 }}>
+            <div key={l.rotulo} onClick={() => { setItemAberto(normalizarTexto(l.rotulo)); setDestinoTxt(""); }} style={{ marginTop: 10, cursor: "pointer" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ width: 18, fontSize: 11, color: "#8E8F96", fontWeight: 700 }}>{idx + 1}º</span>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#F1EFE9", fontWeight: 700 }}>{l.rotulo}</span>
                 <span style={{ fontSize: 13, fontWeight: 800, color: "#E4DE00" }}>{l.n}×</span>
+                <ChevronRight size={14} color="#8E8F96" />
               </div>
               <div style={{ height: 7, background: "#26272B", borderRadius: 4, marginTop: 5, overflow: "hidden" }}>
                 <div style={{ width: `${(l.n / max) * 100}%`, height: "100%", background: "#E4DE00" }} />
@@ -4542,17 +4581,78 @@ function GraficoRanking({ titulo, ajuda, eventos, unidade = "itens", leitura = "
           </>)}
         </>
       )}
+
+      {(() => {
+        const ocorr = itemAberto ? base.filter((e) => normalizarTexto(e.rotulo) === itemAberto).sort((x, y) => x.data.localeCompare(y.data)) : [];
+        if (!itemAberto) return null;
+        const nome = ocorr[0] ? ocorr[0].rotulo : itemAberto;
+        const diaSem = (iso) => ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"][new Date(iso + "T12:00:00").getDay()];
+        const rotulosAtuais = [...new Set(eventos.map((e) => e.rotulo))].sort((x, y) => x.localeCompare(y, "pt-BR"));
+        return (
+          <Sheet title={nome} onClose={() => setItemAberto(null)}>
+            <div style={{ fontSize: 13, color: "#B9BABF", marginBottom: 14 }}>
+              <b style={{ color: "#E4DE00" }}>{ocorr.length}×</b> {mesAtual ? `em ${rotuloMes(mesAtual)}` : "em todos os meses"}. Abaixo estão os dias.
+              {tipo === "exercicio" ? " Se a aptidão de um dia estiver errada, corrija ali mesmo." : " Para mudar a aptidão de um exercício daquele dia, escolha a nova."}
+            </div>
+            {ocorr.length === 0 && <div style={{ fontSize: 13, color: "#8E8F96" }}>Nenhuma ocorrência neste filtro.</div>}
+            {ocorr.map((o) => (
+              <div key={`${o.progId}-${o.diaIdx}-${o.exIdx}`} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 800, color: "#F1EFE9" }}>{diaSem(o.data)} · {o.data.slice(8, 10)}/{o.data.slice(5, 7)}/{o.data.slice(0, 4)}</span>
+                  {o.progNome && <span style={{ fontSize: 11, color: "#8E8F96", textAlign: "right" }}>{o.progNome}</span>}
+                </div>
+                {tipo === "aptidao" && <div style={{ fontSize: 14, color: "#E6E4DE", marginTop: 6 }}>{o.nome}</div>}
+                {tipo === "exercicio" && o.nome && normalizarTexto(o.nome) !== normalizarTexto(o.rotulo) && <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 4 }}>escrito como: {o.nome}</div>}
+                <div style={{ fontSize: 11, color: "#8E8F96", margin: "8px 0 4px" }}>Aptidão desenvolvida neste dia:</div>
+                <ObjetivoSelect valor={o.objetivo} onChange={(v) => onCorrigir && onCorrigir(o, v)} />
+              </div>
+            ))}
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", margin: "20px 0 8px" }}>LIMPAR ESTE ITEM DO GRÁFICO</div>
+            <Field label="Passar a contar junto com outro nome (unir)">
+              <TextInput list="gr-nomes" value={destinoTxt} onChange={(e) => setDestinoTxt(e.target.value)} placeholder="Digite ou escolha o nome que deve valer" />
+              <datalist id="gr-nomes">{rotulosAtuais.filter((r) => normalizarTexto(r) !== itemAberto).map((r) => <option key={r} value={r} />)}</datalist>
+            </Field>
+            <div style={{ display: "flex", gap: 8 }}>
+              <PrimaryButton onClick={() => { if (destinoTxt.trim() && onAjustar) { onAjustar(tipo, nome, "renomear", destinoTxt.trim()); setItemAberto(null); } }} style={{ flex: 1 }}><Lock size={13} /> Renomear / unir</PrimaryButton>
+              <GhostButton onClick={() => { if (onAjustar) { onAjustar(tipo, nome, "ocultar", ""); setItemAberto(null); } }} style={{ flex: 1, color: "#FF8A3D", borderColor: "#FF8A3D66" }}><Lock size={13} /> Tirar do gráfico</GhostButton>
+            </div>
+            <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 10, lineHeight: 1.5 }}>Isso só limpa o gráfico: as programações continuam como estão. Dá para desfazer em "Ajustar nomes".</div>
+          </Sheet>
+        );
+      })()}
+
+      {gerenciar && (
+        <Sheet title="Ajustar nomes do gráfico" onClose={() => setGerenciar(false)}>
+          <div style={{ fontSize: 13, color: "#B9BABF", lineHeight: 1.55, marginBottom: 14 }}>
+            Itens tirados do gráfico ou renomeados aparecem aqui. Para limpar um novo item, toque nele no gráfico.
+            {ocultos > 0 && <> No momento, <b style={{ color: "#F1EFE9" }}>{ocultos}</b> ocorrência{ocultos === 1 ? "" : "s"} {ocultos === 1 ? "está" : "estão"} fora da conta.</>}
+          </div>
+          {Object.values(ajustes).filter((x) => x.tipo === tipo).length === 0 && <div style={{ fontSize: 13, color: "#8E8F96" }}>Nenhum ajuste feito ainda.</div>}
+          {Object.values(ajustes).filter((x) => x.tipo === tipo).sort((x, y) => x.original.localeCompare(y.original, "pt-BR")).map((x) => (
+            <div key={x.chave} style={{ display: "flex", alignItems: "center", gap: 10, background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: "#F1EFE9" }}>
+                <b>{x.original}</b>
+                <div style={{ fontSize: 12, color: x.acao === "ocultar" ? "#FF8A3D" : "#E4DE00", marginTop: 2 }}>{x.acao === "ocultar" ? "fora do gráfico" : `conta como "${x.destino}"`}</div>
+              </div>
+              <GhostButton onClick={() => onDesfazer && onDesfazer(x.chave)} style={{ padding: "6px 12px", fontSize: 12.5 }}><Lock size={11} /> Desfazer</GhostButton>
+            </div>
+          ))}
+        </Sheet>
+      )}
     </div>
   );
 }
 
 // Os dois gráficos: exercícios mais usados e aptidão mais trabalhada
-function GraficosProgramacao({ programacoes, biblioteca = [] }) {
+function GraficosProgramacao({ programacoes, biblioteca = [], senha, onProgramacaoAtualizada, onToast }) {
+  const { pedir, Modal } = useSenhaGate(senha);
+  const [ajustes, setAjustes] = useState({});
+  useEffect(() => { (async () => setAjustes(await fetchGraficoAjustes()))(); }, []);
+
   // nomes parecidos (apelidos) contam como o exercício principal
   const canon = {};
   biblioteca.forEach((b) => variantesDe(b).forEach((v) => { const k = limparNome(v); if (k) canon[k] = b.nome; }));
-  const evExercicios = [];
-  const evAptidoes = [];
+  const ocorr = [];
   let semData = 0;
   programacoes.forEach((p) => {
     const ref = dataRefProgramacao(p);
@@ -4561,14 +4661,52 @@ function GraficosProgramacao({ programacoes, biblioteca = [] }) {
     p.dias.forEach((d, i) => {
       // cada exercício conta no mês do DIA em que foi programado (semana que cruza dois meses é dividida)
       const dia = new Date(segunda.getFullYear(), segunda.getMonth(), segunda.getDate() + i);
-      const mes = `${dia.getFullYear()}-${pad2(dia.getMonth() + 1)}`;
-      exerciciosDoDia(d).forEach((e) => {
-        if ((e.nome || "").trim()) evExercicios.push({ mes, rotulo: canon[limparNome(e.nome)] || e.nome.trim() });
-        if ((e.objetivo || "").trim()) evAptidoes.push({ mes, rotulo: e.objetivo.trim() });
+      const data = dataISOLocal(dia);
+      const mes = data.slice(0, 7);
+      exerciciosDoDia(d).forEach((e, k) => {
+        const nome = (e.nome || "").trim();
+        ocorr.push({ progId: p.id, progNome: p.nome || "", diaIdx: i, exIdx: k, data, mes, nome, objetivo: (e.objetivo || "").trim(), canon: nome ? canon[limparNome(nome)] || nome : "" });
       });
     });
   });
+  let ocultosEx = 0, ocultosAp = 0;
+  const evExercicios = [];
+  const evAptidoes = [];
+  ocorr.forEach((o) => {
+    if (o.nome) {
+      const r = aplicarAjusteGrafico(ajustes, "exercicio", o.canon);
+      if (r) evExercicios.push({ ...o, rotulo: r }); else ocultosEx++;
+    }
+    if (o.objetivo) {
+      const r = aplicarAjusteGrafico(ajustes, "aptidao", o.objetivo);
+      if (r) evAptidoes.push({ ...o, rotulo: r }); else ocultosAp++;
+    }
+  });
   const leitura = `${programacoes.length - semData} de ${programacoes.length} programações lidas${semData ? ` · ${semData} sem data (fora da conta)` : ""}`;
+
+  const ajustar = (tipo, original, acao, destino) => pedir(async () => {
+    const r = await salvarGraficoAjusteDb(tipo, original, acao, destino);
+    if (!r) { if (onToast) onToast("Não consegui salvar: rode o grafico_ajustes.sql no Supabase"); return; }
+    setAjustes((prev) => ({ ...prev, [r.chave]: r }));
+    if (onToast) onToast(acao === "ocultar" ? "Tirado do gráfico" : `Agora conta como "${destino}"`);
+  });
+  const desfazer = (chave) => pedir(async () => {
+    const ok = await removerGraficoAjusteDb(chave);
+    if (!ok) { if (onToast) onToast("Não consegui desfazer"); return; }
+    setAjustes((prev) => { const c = { ...prev }; delete c[chave]; return c; });
+    if (onToast) onToast("Ajuste desfeito");
+  });
+  // corrige a aptidão (objetivo) de UM exercício em UM dia, direto na programação da semana
+  const corrigir = (o, novoObjetivo) => pedir(async () => {
+    const prog = programacoes.find((p) => p.id === o.progId);
+    if (!prog) return;
+    const nova = { ...prog, dias: prog.dias.map((d, i) => (i !== o.diaIdx ? d : { ...d, exercicios: exerciciosDoDia(d).map((e, k) => (k === o.exIdx ? { ...e, objetivo: novoObjetivo } : e)) })) };
+    const salva = await atualizarProgramacaoDb(prog.id, nova);
+    if (!salva) { if (onToast) onToast("Não consegui salvar a correção"); return; }
+    if (onProgramacaoAtualizada) onProgramacaoAtualizada(salva.id ? salva : { ...nova });
+    if (onToast) onToast("Aptidão corrigida nesse dia");
+  });
+
   return (
     <>
       <GraficoRanking
@@ -4577,6 +4715,12 @@ function GraficosProgramacao({ programacoes, biblioteca = [] }) {
         eventos={evExercicios}
         unidade="exercícios"
         leitura={leitura}
+        tipo="exercicio"
+        ajustes={ajustes}
+        onAjustar={ajustar}
+        onDesfazer={desfazer}
+        onCorrigir={corrigir}
+        ocultos={ocultosEx}
       />
       <GraficoRanking
         titulo="APTIDÃO MAIS DESENVOLVIDA"
@@ -4584,7 +4728,14 @@ function GraficosProgramacao({ programacoes, biblioteca = [] }) {
         eventos={evAptidoes}
         unidade="objetivos"
         leitura={leitura}
+        tipo="aptidao"
+        ajustes={ajustes}
+        onAjustar={ajustar}
+        onDesfazer={desfazer}
+        onCorrigir={corrigir}
+        ocultos={ocultosAp}
       />
+      {Modal}
     </>
   );
 }
@@ -5063,7 +5214,7 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
             </div>
           )}
           {atuais.map(renderCard)}
-          <GraficosProgramacao programacoes={daPasta} biblioteca={biblioteca} />
+          <GraficosProgramacao programacoes={daPasta} biblioteca={biblioteca} senha={senha} onProgramacaoAtualizada={(p) => setProgramacoes((prev) => prev.map((x) => (x.id === p.id ? p : x)))} onToast={onToast} />
 
           {passadas.length > 0 && (
             <div style={{ marginTop: 18 }}>
