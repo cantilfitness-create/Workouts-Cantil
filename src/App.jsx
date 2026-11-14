@@ -7061,9 +7061,27 @@ const IconeWhatsapp = ({ size = 20 }) => (
 );
 
 /* ---------------------------- página pública ---------------------------- */
+const CSS_CT = `
+.ct-tela{box-sizing:border-box;min-height:100vh;min-height:100svh;padding-top:22px;}
+.ct-planos{padding-bottom:22px;}
+@keyframes ctseta{0%,100%{transform:translateY(0)}50%{transform:translateY(3px)}}
+.ct-seta{animation:ctseta 1.3s ease-in-out infinite;}
+`;
+
 function ViewOnlyCT({ onVoltar }) {
   const [info, setInfo] = useState(null);
   useEffect(() => { (async () => setInfo((await fetchCtInfo()).info))(); }, []);
+  const planosRef = useRef(null);
+  const [mostrarBtn, setMostrarBtn] = useState(true);
+  useEffect(() => {
+    // o botão flutuante aparece enquanto a seção de planos ainda está abaixo da tela
+    const f = () => { const el = planosRef.current; if (el) setMostrarBtn(el.getBoundingClientRect().top > window.innerHeight * 0.4); };
+    f();
+    window.addEventListener("scroll", f, { passive: true });
+    window.addEventListener("resize", f);
+    return () => { window.removeEventListener("scroll", f); window.removeEventListener("resize", f); };
+  }, [info]);
+  const irParaPlanos = () => { if (planosRef.current) planosRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); };
   const fundo = { background: "#0A0A0A", minHeight: "100vh", fontFamily: "'Inter', sans-serif" };
   if (!info) return <div style={{ ...fundo, padding: 30, color: "#9A9BA2", textAlign: "center" }}><style>{FONT_IMPORT}</style>Carregando...</div>;
   const zap = urlWhatsapp(info);
@@ -7079,26 +7097,27 @@ function ViewOnlyCT({ onVoltar }) {
   const secao = (t) => <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.14em", margin: "24px 0 10px" }}>{t}</div>;
   return (
     <div style={fundo}>
-      <style>{FONT_IMPORT}</style>
-      <div style={{ maxWidth: 520, margin: "0 auto", padding: "22px 16px 60px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+      <style>{FONT_IMPORT + CSS_CT}</style>
+      <div style={{ maxWidth: 520, margin: "0 auto", padding: "0 16px 60px" }}>
+        <div className="ct-tela" style={{ display: "flex", flexDirection: "column", paddingBottom: 90 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: "clamp(10px, 2.5vh, 20px)" }}>
           <div style={{ width: 40, height: 40, borderRadius: 9, background: "#E4DE00", display: "flex", alignItems: "center", justifyContent: "center" }}><Dumbbell size={22} color="#0A0A0A" /></div>
           <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, color: "#FFFFFF", lineHeight: 1 }}>CANTIL <span style={{ display: "block", color: "#E4DE00", fontSize: 10, letterSpacing: "0.38em", marginTop: 3 }}>FITNESS</span></div>
-        </div>
+          </div>
 
-        <div style={{ background: "linear-gradient(165deg, #20211A, #121315)", border: "1px solid rgba(228,222,0,0.3)", borderTop: "4px solid #E4DE00", borderRadius: 18, padding: "24px 20px" }}>
-          <div style={{ fontSize: 11.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.12em" }}>BEM-VINDO AO</div>
-          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 36, color: "#FFFFFF", lineHeight: 1.05, marginTop: 6 }}>{info.titulo}</div>
-          <div style={{ fontSize: 17, color: "#D8D9DE", lineHeight: 1.55, marginTop: 12 }}>{info.chamada}</div>
-          <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 10 }}>
-            {botaoZap}
-            {mapa && <a href={mapa} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "1px solid #3A3B40", color: "#F1EFE9", fontWeight: 700, fontSize: 15, borderRadius: 14, padding: "13px 16px", textDecoration: "none" }}><MapPin size={18} color="#E4DE00" /> Como chegar</a>}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <div style={{ background: "linear-gradient(165deg, #20211A, #121315)", border: "1px solid rgba(228,222,0,0.3)", borderTop: "4px solid #E4DE00", borderRadius: 18, padding: "clamp(16px, 3.2vh, 26px) 20px" }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.12em" }}>BEM-VINDO AO</div>
+              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: "clamp(30px, 5.4vh, 40px)", color: "#FFFFFF", lineHeight: 1.05, marginTop: 6 }}>{info.titulo}</div>
+              <div style={{ fontSize: "clamp(15px, 2.2vh, 18px)", color: "#D8D9DE", lineHeight: 1.5, marginTop: 10 }}>{info.chamada}</div>
+              <div style={{ marginTop: "clamp(14px, 2.8vh, 24px)" }}>{botaoZap}</div>
+              {!zap && <div style={{ color: "#8E8F96", fontSize: 13, marginTop: 4 }}>Em breve: contato pelo WhatsApp.</div>}
+            </div>
           </div>
         </div>
 
-        {info.sobre && (<>{secao("SOBRE O CT")}<div style={{ fontSize: 16, color: "#E6E4DE", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{info.sobre}</div></>)}
-
-        {secao("PLANOS")}
+        <div ref={planosRef} className="ct-tela ct-planos" style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.14em", margin: "0 0 10px" }}>PLANOS E VALORES</div>
         {(() => {
           const ehExp = (p) => p.experimental || /experimental/i.test(p.nome || "");
           const exp = info.planos.find(ehExp);
@@ -7107,10 +7126,10 @@ function ViewOnlyCT({ onVoltar }) {
           return (
             <>
               {exp && (
-                <div style={{ background: "linear-gradient(160deg, #F4EE22, #E4DE00 55%, #CFC900)", color: "#0A0A0A", borderRadius: 20, padding: "22px 20px", marginBottom: 14, boxShadow: "0 8px 28px rgba(228,222,0,0.22)" }}>
+                <div style={{ background: "linear-gradient(160deg, #F4EE22, #E4DE00 55%, #CFC900)", color: "#0A0A0A", borderRadius: 20, padding: "clamp(14px, 2.4vh, 22px) 20px", marginBottom: 10, boxShadow: "0 8px 28px rgba(228,222,0,0.22)" }}>
                   <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.14em" }}>COMECE POR AQUI</div>
-                  <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, lineHeight: 1.05, marginTop: 6 }}>{exp.nome}</div>
-                  {exp.preco && <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, marginTop: 6 }}>{exp.preco}</div>}
+                  <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: "clamp(26px, 4vh, 32px)", lineHeight: 1.05, marginTop: 6 }}>{exp.nome}</div>
+                  {exp.preco && <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: "clamp(20px, 3.2vh, 26px)", marginTop: 4 }}>{exp.preco}</div>}
                   {itens(exp.descricao).length > 0 && (
                     <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
                       {itens(exp.descricao).map((l, k) => (
@@ -7129,7 +7148,7 @@ function ViewOnlyCT({ onVoltar }) {
                 {demais.map((p) => {
                   const resumo = itens(p.descricao).join(" · ");
                   return (
-                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, background: "#1A1B1E", border: p.destaque ? "2px solid #E4DE00" : "1px solid #2E2F35", borderRadius: 12, padding: p.destaque ? "9px 13px" : "10px 14px" }}>
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, background: "#1A1B1E", border: p.destaque ? "2px solid #E4DE00" : "1px solid #2E2F35", borderRadius: 12, padding: p.destaque ? "clamp(6px, 1vh, 9px) 13px" : "clamp(7px, 1.2vh, 10px) 14px" }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         {p.destaque && <div style={{ fontSize: 9.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", marginBottom: 2 }}>★ MAIS ESCOLHIDO</div>}
                         <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", lineHeight: 1.2 }}>{p.nome}</div>
@@ -7143,6 +7162,7 @@ function ViewOnlyCT({ onVoltar }) {
             </>
           );
         })()}
+        </div>
 
         {info.horarios.length > 0 && (<>
           {secao("HORÁRIOS DE ATENDIMENTO")}
@@ -7156,9 +7176,12 @@ function ViewOnlyCT({ onVoltar }) {
           </div>
         </>)}
 
-        {info.endereco && (<>
+        {info.sobre && (<>{secao("SOBRE O CT")}<div style={{ fontSize: 16, color: "#E6E4DE", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{info.sobre}</div></>)}
+
+        {(info.endereco || mapa) && (<>
           {secao("ONDE FICA")}
-          <div style={{ fontSize: 16, color: "#E6E4DE", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{info.endereco}</div>
+          {info.endereco && <div style={{ fontSize: 16, color: "#E6E4DE", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{info.endereco}</div>}
+          {mapa && <a href={mapa} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "1px solid #3A3B40", color: "#F1EFE9", fontWeight: 700, fontSize: 15, borderRadius: 14, padding: "13px 16px", textDecoration: "none", marginTop: 12 }}><MapPin size={18} color="#E4DE00" /> Como chegar</a>}
         </>)}
 
         <div style={{ marginTop: 30, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -7168,6 +7191,14 @@ function ViewOnlyCT({ onVoltar }) {
         </div>
         <button onClick={onVoltar} style={{ display: "block", margin: "26px auto 0", background: "none", border: "none", color: "#8E8F96", fontSize: 12.5, cursor: "pointer", textDecoration: "underline" }}>Ver os treinos do CANTIL</button>
       </div>
+      <button onClick={irParaPlanos} aria-label="Ir para planos e valores" style={{
+        position: "fixed", left: "50%", bottom: "calc(18px + env(safe-area-inset-bottom, 0px))", zIndex: 50,
+        transform: mostrarBtn ? "translateX(-50%)" : "translateX(-50%) translateY(24px)", opacity: mostrarBtn ? 1 : 0, pointerEvents: mostrarBtn ? "auto" : "none",
+        transition: "opacity .25s ease, transform .25s ease", background: "#E4DE00", color: "#0A0A0A", border: "none", borderRadius: 999,
+        padding: "13px 22px", fontWeight: 800, fontSize: 15.5, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", boxShadow: "0 8px 24px rgba(0,0,0,0.55)", whiteSpace: "nowrap",
+      }}>
+        Planos e valores <ChevronDown size={19} className="ct-seta" />
+      </button>
     </div>
   );
 }
