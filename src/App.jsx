@@ -121,7 +121,7 @@ function formatarDataHora(iso) {
 /* ---------------------------- mapeamento banco <-> app ---------------------------- */
 
 /* ---------------------------- ícones dos protocolos ---------------------------- */
-// 25 ícones Cantil Fitness (os últimos: Core, Habilidades, 1% Todo Dia, Flow, Competitivo, Core Training e Skill) (escolhidos em cada protocolo) — imagens pequenas para economizar espaço
+// 26 ícones Cantil Fitness (o último é o Time Cantil; antes: Core, Habilidades, 1% Todo Dia, Flow, Competitivo, Core Training e Skill) (escolhidos em cada protocolo) — imagens pequenas para economizar espaço
 const ICONES_PROTOCOLO = [
   {"id": "strength", "nome": "Strength", "sub": "Força e resistência muscular", "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQBAMAAAB8P++eAAAAMFBMVEXz8QDs5gDj3QDj3gC2tgB/fwD/fwD/sQD/AAAA/wAAAADj3QAAAAAAAAAAAAAAAAAoBdV1AAAADHRSTlMM9l+cAwICAwEBAPzhXuqTAAADc0lEQVR42o2XP2wbdRTHv+e4Tvpbcl4CBEGvA6JkcpcOnVxVYshCphNUtH6JqKluihhQ26nqUEGnDtW1BJG+mFBVNyAvZCqShcQfMUUMpgIJDiGFkIEey4t7ce8Y7rCdxPf75SRLPuvj7/u9977v97uzAuy/iLPPwat84F78q+Gr/mEO1gFFeiECni3XDoGlg4rR9L927Y4xtExat9G7DyOozv/tOn+8sQxj6OSf6p4d3jGD34SKIWZQpM3gubZZseUB2NowJlNOAIAjo6KVMIDbgVHx2OXXd5ieKjL3+qcX5cTdY+ZkgsnK0vVvYQYR23DrRwEr4dSYFY5xzzgvjlVEcFQQDGDDJUN5AAHqMj8vBlDRJKPTeVbbDdkQ2oFzRr78bXvFtMYItzotLzjeJFMyitgCfMeQTP0vlOgcANT1ip0I1hcdBsKOoTzA6jUAcBy9ouyQ2m4RqGvrFdeTa0hTSLpeMbjnkiBogGabpjrOO5CzQLduAMUNoUJmm1yDYkkBDDXhBnqwbOU1qt56aGhh3kj+c+FIINQjr60F00FaTvtIisaZSQaxuws6sI98YEnmIq1iOXM2zajtCzpwKq9jbxNWXwf2UgYAeaVFiRfqQmcytHwRCjd0LVzyst8nZd98HVZcy8pennCwpXP4w585r2akWDSKj7PiTaAeYinW7OHxV1mVmlCwysWK5VZWb18ASvrFYLORfzkr90S7Ndfy3a7LP0QaMG7t5NaxLvsteFQE9i0AcAHwa/WGRvHHSwzIHAGw8RacehHIDgB6HwA+9NpsdwqTsQFJr8wAynx8UCybBCxJiSIdKKnPawKAPsPI1OwHkzjE4oqnHkUEsPeUi8DeqpIpl3HhgSClNwOvyBTe7ixNK6DS3CX+OH53vWCNfd9m6wYD8NeA7sZ6UdbxopJTWbgrvipxYXkCh/Fd1gwfOO5REfh1BE+NHC8LBTOz98nL6PlZS6gaFHdmr0TyPAunlK1vIcV5j/2b5KNdNK40na5U/t+ZZ+CERYqM4THkfkCFMxM01K/Du4s8W3AWytvfy6dDGzKV4vY4U8gvjf1mVatntmiMojpls7yDQd8moJ7c9w4/2Qud3hG8NHiIkUUbOPlk8Mdh6M9DOVl1hkZ4UHXU77UxoZ9Xk6ujK8RHQtgc/1LhlkfOSXmvMuqz/wDr8zV2mpR5YgAAAABJRU5ErkJggg=="},
   {"id": "run", "nome": "Run Funcional", "sub": "Corrida + exercícios", "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQBAMAAAB8P++eAAAAMFBMVEXs5gD08gDj3QDk3gC2tgD8ugB/fwD/fwCh5QD/AAAAAADj3QAAAAAAAAAAAAAAAACExpHyAAAADHRSTlP3C16fAwQCAgQBAP1eMAE3AAAFHElEQVR42o2WT2wUVRzHP7NbNj4nkfUCLYlQTYjAqTXR1hseNshtZBMqaSL14mxNLFNqKYMxCgemQIChVHFiQpsYCJAgLzHB4MTEmyGRUD2YkIr0IsQodTR5Pihd1sPstjP7hzqn+b188/39fd/3My7R4tOuz6NRv2YaLYHog5WHnqhZbS1hzoZfybrUKDMtCSdmw7B8T6/I6P4LhNsmWYmxKy8BKisCZ/KAulJeEVj/tXYdpe3mydiWZPX/ANoB2zkMmNumngDU04GN8fwsoJ4U4zfu4OBfl+ZvSBRWu9uy13agD902VQhYKvPFqlZALUoPlSkB1MF/fs0HLWJcuHh93gyrxu++47eIUe97834oq4bZEeO03Qh0x0+Yy9aN321Au4FTH6N2NszKhK0ORD7oU3tEPTBTklAwa2BlREI7G2a2RH7atfuhRBXosmpRvtFGdmJW5uti1ONzKF569rdl94vxyNWVx82ZFNf6HF4+ylIehq65FFDru6F6fNTuWj4yyrY4VSLamnY9YWJ1nA8GZ6q2RXkk8I6r4p/fpRinb0rV7QidreEU8t3S+pnMWk+kGG91UnRdKMe5KN0FYn5GbvJFKmutZwo9tg9Gf0zYHmHeNsPimJNu4cUJM2MLYKg6Bccii1Cqx7H+LAF133G1yfXBjS+06t0zAWB1tKXH7Ksf/siMCUCvAVDFs+6FjaCMqk7VGO2dc+d6rwGajwF40fX7RiysDjc9j0HJ5Ps80HaqH8AaA4Y2Fl72/NSEv7c4byIj4NzPMYETIHZdfGm0NuRVxuxz3QprFejv5ySgrnAGes7stxv00c1bmUdxHwGOBIM24l27/nItZJn86LaI8m5OApj7Dt0Jvt7+ab2k6NyNXeuP5P7O03W3NhB47jJfzbUzTvnO/mIW+qqjE4byphc49UBxwgzlicdldHZpus3w5gHPSQMXvFmJyebr8G1iPsNfjnhpYLma+xxtr/UnkPLWqJNKJrsk6aP/Jm+lefngqylGI/6PZrSOZAr5Y08KuDikAEv72bjcqlCo3a50HYVYXQiVMcnVqxKg2HWsAKZMPDPVgnucVMWOUT/qBFCPh3e+AM/EFzsFFI739lpPMLATgM1uAA/eAnUlquu15wba9TWx57PChg0m4HYO1EmzdoSPHn4oQR3ND7BQKUnUjinRVMMXKiUJhWeFj5P7HApbIr+php//WYIyfAH6LihjTDTVcLtvDrA2u1D2w+pfI2NlOHjHrNEsGJYkkyBMMA77pWkJxY5rgDMEhU0Xmz2a2ts33y8pbBkTgMh9rjIHcgngUtZ25n4IasfU9a2g2R0W1uE3YxRrLgDWFjeWJFMZR3PN3ms9PgjK6h7JxWouC+vODzQDjiwCVrc7PQDY/u56wqWsX+mUqG73vQFAB3tNq+N801VB9+2GHRfOnAZwH94PX/dE0y3luz0mhU32YKzR90O+dJqvM9c6pcqMxcLQNmGC5TcD2vb4bGJ/qDTbNdqAhYB3KPQOVqNadFTysiQYcyU3OmfsrRGKXXmLSraRURvz86a1blm6enp2Q7kR6BqmZFuiHMLpxHj/kwbXngLVey35cEeWcbIxxuwp4F5yufNPc/mw0+A6N72R/tUzydOhjVZmqrE8Pyzw4NNkx4TYe+KnbGN5Jj+wKmlH/v7h9lwjULcnNKamHF6zFlYwjqePhefWAY1LoJ0pDiwtOy2+NkCIgejp6H8A8UTpqZXW61hxnc9W3MP/A2FL6bW5uZy+AAAAAElFTkSuQmCC"},
@@ -148,6 +148,7 @@ const ICONES_PROTOCOLO = [
   {"id": "competitivo", "nome": "Protocolo Cantil – Competitivo", "sub": "Desempenho e competição", "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQBAMAAAB8P++eAAAAMFBMVEUAAADo4gDz8QDj3QDk3gC3twD8tgB/fwD/fwD/AAAA/wC/fwAAAAAAAAAAAAAAAABzOyTdAAAADHRSTlMA+ApfnwMDAgIBAQT4+UoLAAAEbklEQVR42u2Wz28TRxTHPzsbYietvd4UGgJkd2xETA5NnEArboFbD21JufSK+AfKqceWW28V6p9Q9Y7EuQJaVWq5oLSlagTCHW9aZUnBO7sRimPjnR42jp2QoEgcqkrMaX5858173/c03wevx/9kiCuAqLywb+1an+qSKnLHGXrwUmCFVAFwaLI323MMvigq8qDeVhYHVvb+QBNvOvqgNg/MVd9N8VJgut9xfupSn4EpgH0il/2Tr+Hqvi8KcXZ+++TMGQZN7siMdBUOCqAinjKn6nvzKOIWtEciAMcPWQsNe0ctAGsFQARLkHrXeQk9g86oF7eFBIICiKQD5NsO8HYHqL9ADFxyXXcsS5u84LqH5UDYVs8DCdTnFL7OojaauTsSUOkg8PIvCpj7/kLz983s5si0c3thCXp89crEdV3XdWsgt/yVUHZd13XHFgd4LP+ZB2B9c+oRGA0kHz/IWBT30z5wYSSrUDN9dglRdh2N2fS39rw3dY9HcVNRHgMoAnbgAaQlwHJrrAIwlN3CvjdUABIJx93fIhACwKob7GD7ab+smfA0CPduJNzQnChqKx6LwBwLcmbC0RlQxC38zRCoPVhLh+LR2YJc9kuPDVA102FV64zH/IS2m6IAvPXUAbfhxOudirMyqUBEvhZRmgVzFFJvErAKlOaF8gJTqSjVTYBUBv16TJLRgtCAb2meqNG/PnCfzFbdcHg6hPHchCTaTuFwtwh209exnTrn5Q1H0lCHn2uw1jv9XAsu39ZglQInAk+gPLCSyCqCfeGNH+o9eoyJXA3Oe89Oq9QkxYan9EZUHV6wNCYKH/YJF7UY4K6qQ85/NFNBbXIPXKCoB8pMWEXA0sg6VEysUxAf3cx2S/V+UVxsdQwwvvAT4MRMRGCWfakBe9X0gd2m8DW076cgkhzjeQ0i2QBqq9X8dvUcqkNcA3P8KnieVQoCwJsB5iEQ2xal0zLVH3PQbkSMydzD0fEoMyiWI+y1tAd0yiHtDzc19pc3hF5Xcsrk9adhC4pHpkJzorBVFMIqIqKh5w44/J06JYyjlXQVc3c8SzOrVOajNwPveG2vBCN0TRG7oaEG3PKCAO4H2dMi2YC20aVyKFabxiTNpq807VaLYybyp0NTzWtEZtBSSoglzCSIq/a7QoIKwDuPWIGVAGyG9QY4C8tWksPf0JhVqf5pgrnYYO1xFDunQ1N9f8lCWhpLp1SMtpspsNhYaaaAtLTdTLn27VOs9Y4tYrALjsYphxyNgHOPkw0DPItzZsLRPz85F3KkNORZmvnvUg4FMTOlHX+cF+GVVEuuQKKF0NjHPOgKCJYGcZ20xq83IUhrGCkaMPONAm8SoXYK7ycKy4Z08SQUBdj1zwFKmF3q81WQlev1WzW0mJRzq9cAofHSncDuF6RdIE1XRLj9+QrR06LLc4e3ZvKklH1FkFd6v7jcDRQ90agMiofo6WUfyCm5b5cCSDfLzC6dPLDGvwpwfXboFVqxvdqZz8b/eN2j/ufjX0BBunpDuLlYAAAAAElFTkSuQmCC"},
   {"id": "core_training", "nome": "Core Training Cantil", "sub": "Estabilidade e controle do tronco", "src": "data:image/png;base64,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"},
   {"id": "skill_cantil", "nome": "Skill Cantil", "sub": "Técnica e controle", "src": "data:image/png;base64,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"},
+  {"id": "time_cantil", "nome": "Time Cantil", "sub": "Comunidade, bandeira e união", "src": "data:image/png;base64,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"}
 ];
 const iconeProtocolo = (id) => ICONES_PROTOCOLO.find((i) => i.id === id) || null;
 function IconeProtocolo({ id, size = 44 }) {
@@ -270,10 +271,14 @@ async function fetchSugestoesExercicios() {
 }
 async function salvarSugestoesExercicios(itens) {
   const linhas = itens
-    .map((i) => ({ chave: limparNome(i.nome), nome: String(i.nome).trim(), status: i.status || "pendente", origem: i.origem || "treino" }))
+    .map((i) => ({
+      chave: limparNome(i.nome), nome: String(i.nome).trim(), status: i.status || "pendente", origem: i.origem || "treino",
+      excluida_em: (i.status || "pendente") === "ignorada" ? new Date().toISOString() : null, // some da lista de excluídas após 15 dias
+    }))
     .filter((l) => l.chave);
   if (linhas.length === 0) return true;
-  const { error } = await supabase.from("sugestoes_exercicios").upsert(linhas, { onConflict: "chave" });
+  let { error } = await supabase.from("sugestoes_exercicios").upsert(linhas, { onConflict: "chave" });
+  if (error && ehErroColuna(error)) ({ error } = await supabase.from("sugestoes_exercicios").upsert(linhas.map(({ excluida_em, ...r }) => r), { onConflict: "chave" }));
   if (error) console.error(error);
   return !error;
 }
@@ -639,6 +644,7 @@ const programacaoFromDb = (r) => ({
   id: r.id, nome: r.nome || "", destaque: !!r.destaque, descricao: r.descricao || "",
   semanaInicio: r.semana_inicio || "",
   pasta: r.pasta || "",
+  encerrada: !!r.encerrada, // semana encerrada à mão: vai para "Semanas anteriores" (coluna criada em ajustes_semana_e_sugestoes.sql)
   dias: normalizarDiasSalvos(r.dias),
   criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
 });
@@ -713,6 +719,12 @@ async function inserirProgramacaoDb(p) {
   const agora = new Date().toISOString();
   const payload = { ...programacaoToDb(p), criado_em: agora, atualizado_em: agora };
   return gravarProgramacao((d) => supabase.from("programacoes_semanais").insert(d).select().single(), payload);
+}
+// Encerrar / reabrir a semana (só mexe na coluna "encerrada", separada do resto para não quebrar o salvar normal)
+async function definirEncerradaDb(id, valor) {
+  const { error } = await supabase.from("programacoes_semanais").update({ encerrada: valor }).eq("id", id);
+  if (error) { console.error(error); return false; }
+  return true;
 }
 async function atualizarProgramacaoDb(id, p) {
   const payload = { ...programacaoToDb(p), atualizado_em: new Date().toISOString() };
@@ -1387,8 +1399,22 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
   // Exercícios usados nas programações (ou sugeridos nos treinos) que ainda NÃO estão na biblioteca.
   // Nomes parecidos (apelidos) cadastrados contam como "já está na biblioteca". Somem da lista quando cadastrados ou ignorados.
   const nomesNaBiblioteca = new Set(exercicios.flatMap((e) => variantesDe(e).map(limparNome)));
-  const ignoradasLista = sugestoes.filter((x) => x.status === "ignorada");
-  const ignoradasChaves = new Set(ignoradasLista.map((x) => x.chave));
+  // Excluídas ficam na lista por 15 dias e depois somem da tela (continuam ignoradas: não voltam como pendentes)
+  const DIAS_LIXEIRA = 15;
+  const todasIgnoradas = sugestoes.filter((x) => x.status === "ignorada");
+  const diasRestantes = (x) => (x.excluida_em ? Math.ceil(DIAS_LIXEIRA - (Date.now() - new Date(x.excluida_em).getTime()) / 86400000) : null);
+  const ignoradasLista = todasIgnoradas.filter((x) => { const d = diasRestantes(x); return d === null || d > 0; });
+  const ignoradasChaves = new Set(todasIgnoradas.map((x) => x.chave));
+  useEffect(() => {
+    // as que ainda não têm data de exclusão começam a contar os 15 dias agora
+    const semData = sugestoes.filter((x) => x.status === "ignorada" && "excluida_em" in x && !x.excluida_em);
+    if (!semData.length) return;
+    const agora = new Date().toISOString();
+    (async () => {
+      const { error } = await supabase.from("sugestoes_exercicios").update({ excluida_em: agora }).in("chave", semData.map((x) => x.chave));
+      if (!error) setSugestoes((prev) => prev.map((x) => (semData.some((s) => s.chave === x.chave) ? { ...x, excluida_em: agora } : x)));
+    })();
+  }, [sugestoes]);
   const pendentesMapa = {};
   programacoes.forEach((pr) => pr.dias.forEach((d) => exerciciosDoDia(d).forEach((e) => {
     const k = limparNome(e.nome);
@@ -1602,7 +1628,7 @@ function BibliotecaTab({ exercicios, recarregar, senha }) {
                   </button>
                   {verIgnoradas && ignoradasLista.map((x) => (
                     <div key={x.chave} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 8 }}>
-                      <span style={{ fontSize: 12.5, color: "#9A9A94" }}>{x.nome}</span>
+                      <span style={{ fontSize: 12.5, color: "#9A9A94" }}>{x.nome}{diasRestantes(x) !== null && <span style={{ color: "#6F7076" }}> · some em {diasRestantes(x)} dia{diasRestantes(x) === 1 ? "" : "s"}</span>}</span>
                       <button onClick={() => restaurarSugestao(x)} style={{ background: "none", border: "none", color: "#E4DE00", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>restaurar</button>
                     </div>
                   ))}
@@ -4400,7 +4426,7 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
   );
 }
 
-function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, onExcluir, senha }) {
+function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, onExcluir, senha, podeEncerrar = false, onEncerrar, onReabrir }) {
   const { pedir, Modal } = useSenhaGate(senha);
 
   const alternar = () => {
@@ -4446,6 +4472,22 @@ function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, o
             {!(item.destaque || livre) && <Lock size={11} />}
             {totalEx} exercício{totalEx === 1 ? "" : "s"} · {(item.destaque || livre) ? "Visível pra todos" : "Detalhes protegidos por senha"}
           </div>
+          {podeEncerrar && onEncerrar && (
+            <button
+              onClick={(e) => { e.stopPropagation(); pedir(() => { if (window.confirm("Encerrar esta semana e enviar para o histórico (Semanas anteriores)?")) onEncerrar(item); }); }}
+              style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(228,222,0,0.12)", border: "1px solid #E4DE0066", color: "#E4DE00", borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}
+            >
+              <Check size={13} /> Encerrar semana
+            </button>
+          )}
+          {item.encerrada && onReabrir && (
+            <button
+              onClick={(e) => { e.stopPropagation(); pedir(() => onReabrir(item)); }}
+              style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "1px solid #3A3B40", color: "#B9BABF", borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+            >
+              Reabrir semana
+            </button>
+          )}
         </div>
         {expandido ? <ChevronDown size={18} color="#8E8F96" /> : <ChevronRight size={18} color="#8E8F96" />}
       </div>
@@ -5045,10 +5087,24 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
   const hoje0 = new Date();
   hoje0.setHours(0, 0, 0, 0);
   const ehPassada = (p) => {
+    if (p.encerrada) return true; // encerrada à mão
     if (p.destaque) return false;
     const ref = dataRefProgramacao(p);
     if (!ref) return false;
     return new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() + 6) < hoje0;
+  };
+  const encerrarSemana = async (p) => {
+    const ok = await definirEncerradaDb(p.id, true);
+    if (!ok) { if (onToast) onToast("Não consegui encerrar: rode o ajustes_semana_e_sugestoes.sql no Supabase"); return; }
+    setProgramacoes((prev) => prev.map((x) => (x.id === p.id ? { ...x, encerrada: true } : x)));
+    setExpandidoId(null);
+    if (onToast) onToast("Semana encerrada. Está em \"Semanas anteriores\".");
+  };
+  const reabrirSemana = async (p) => {
+    const ok = await definirEncerradaDb(p.id, false);
+    if (!ok) { if (onToast) onToast("Não consegui reabrir a semana"); return; }
+    setProgramacoes((prev) => prev.map((x) => (x.id === p.id ? { ...x, encerrada: false } : x)));
+    if (onToast) onToast("Semana reaberta");
   };
   const atuais = filtradas.filter((p) => !ehPassada(p));
   const passadas = filtradas.filter(ehPassada).sort((x, y) => dataRefProgramacao(y) - dataRefProgramacao(x));
@@ -5063,6 +5119,9 @@ function ProgramacaoSemanalTab({ senha, onToast }) {
       onExcluir={excluir}
       livre={item.id === primeiraId}
       senha={senha}
+      podeEncerrar={!ehPassada(item)}
+      onEncerrar={encerrarSemana}
+      onReabrir={reabrirSemana}
     />
   );
 
