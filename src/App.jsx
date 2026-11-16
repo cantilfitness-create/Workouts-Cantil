@@ -621,6 +621,8 @@ function diasVazios() {
 }
 const exerciciosDoDia = (d) => (Array.isArray(d.exercicios) ? d.exercicios : []);
 const treinosDoDia = (d) => (Array.isArray(d.treinos) ? d.treinos : []);
+// Previsão de aptidão do dia: só para organizar a semana. Fica separada dos exercícios, então NÃO entra nos gráficos.
+const previsaoDoDia = (d) => (Array.isArray(d && d.previsao) ? d.previsao.filter(Boolean) : []);
 const diaTemConteudo = (d) => exerciciosDoDia(d).length > 0 || treinosDoDia(d).length > 0;
 // Junta textos iguais ignorando maiúsculas e acentos (para contar nos gráficos)
 const normalizarTexto = (t) => String(t || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -655,6 +657,7 @@ const programacaoToDb = (p) => ({ nome: p.nome || "", destaque: !!p.destaque, de
     dia: d.dia,
     exercicios: exerciciosDoDia(d).map((e) => ({ nome: e.nome, objetivo: e.objetivo || "" })),
     treinos: treinosDoDia(d), // treinos marcados como "executado hoje" naquele dia
+    previsao: previsaoDoDia(d), // previsão de aptidão (planejamento; fora dos gráficos)
   })),
 });
 
@@ -4320,6 +4323,17 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
   );
 
   const [expandidos, setExpandidos] = useState({}); // dias com a aba "anteriores" aberta
+  const [previsaoAberta, setPrevisaoAberta] = useState({}); // dias com a lista de aptidões aberta
+  const alternarPrevisao = (idx, apt) => setForm({
+    ...form,
+    dias: form.dias.map((d, i) => {
+      if (i !== idx) return d;
+      const atual = previsaoDoDia(d);
+      return { ...d, previsao: atual.includes(apt) ? atual.filter((x) => x !== apt) : [...atual, apt] };
+    }),
+  });
+  const resumoPrevisao = {};
+  form.dias.forEach((d) => previsaoDoDia(d).forEach((p) => { resumoPrevisao[p] = (resumoPrevisao[p] || 0) + 1; }));
   const nomesBib = new Set(biblioteca.map((b) => normalizarTexto(b.nome)));
 
   const definirLista = (idx, lista) => {
@@ -4393,9 +4407,51 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
               </div>
             )))}
             <AdicionarExercicio biblioteca={biblioteca} onAdd={(nome) => adicionar(i, nome)} />
+
+            {/* Previsão de aptidão do dia (planejamento: não conta nos gráficos) */}
+            {(() => {
+              const prev = previsaoDoDia(d);
+              const aberta = !!previsaoAberta[d.dia];
+              const lista2 = [...APTIDOES.filter((x) => x !== "Aquecimento"), ...prev.filter((x) => !APTIDOES.includes(x))];
+              return (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #33343A" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#8E8F96", letterSpacing: "0.08em" }}>PREVISÃO</span>
+                    {prev.map((p) => (
+                      <span key={p} onClick={() => alternarPrevisao(i, p)} style={{ display: "inline-flex", alignItems: "center", gap: 5, border: "1px dashed #E4DE00", color: "#E4DE00", borderRadius: 999, padding: "4px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                        {p} <X size={11} />
+                      </span>
+                    ))}
+                    <button type="button" onClick={() => setPrevisaoAberta({ ...previsaoAberta, [d.dia]: !aberta })} style={{ background: "none", border: "1px solid #3A3B40", color: "#B9BABF", borderRadius: 999, padding: "4px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                      {aberta ? "Fechar" : prev.length ? "+ Mais" : "+ Aptidão prevista"}
+                    </button>
+                  </div>
+                  {aberta && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                      {lista2.map((apt) => {
+                        const ativo = prev.includes(apt);
+                        return (
+                          <button type="button" key={apt} onClick={() => alternarPrevisao(i, apt)} style={{ cursor: "pointer", borderRadius: 999, padding: "6px 11px", fontSize: 12.5, fontWeight: ativo ? 800 : 600, background: ativo ? "#E4DE00" : "#212226", color: ativo ? "#0A0A0A" : "#D0D1D6", border: `1px solid ${ativo ? "#E4DE00" : "#3A3B40"}` }}>{apt}</button>
+                        );
+                      })}
+                      <button type="button" onClick={() => { const t = window.prompt("Digite a aptidão prevista:"); if (t && t.trim() && !prev.includes(t.trim())) alternarPrevisao(i, t.trim()); }} style={{ cursor: "pointer", borderRadius: 999, padding: "6px 11px", fontSize: 12.5, fontWeight: 600, background: "none", color: "#B9BABF", border: "1px dashed #3A3B40" }}>✎ Outra…</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         );
       })}
+
+      {Object.keys(resumoPrevisao).length > 0 && (
+        <div style={{ background: "#1C1D20", border: "1px dashed #E4DE0066", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.08em", marginBottom: 6 }}>PREVISÃO DA SEMANA (não entra nos gráficos)</div>
+          <div style={{ fontSize: 13, color: "#E6E4DE", lineHeight: 1.6 }}>
+            {Object.entries(resumoPrevisao).sort((x, y) => y[1] - x[1]).map(([k, n]) => `${k} ${n}×`).join("  ·  ")}
+          </div>
+        </div>
+      )}
 
       <Field label="Observações da semana (opcional, visível para todos)">
         <AutoTextArea
@@ -4438,7 +4494,9 @@ function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, o
   const w = ref ? semanaDoAno(ref) : null;
   const fim = ref ? new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() + 6) : null;
   const totalEx = item.dias.reduce((n, d) => n + exerciciosDoDia(d).length, 0);
-  const diasComConteudo = item.dias.filter(diaTemConteudo);
+  const diasComConteudo = item.dias.filter((d) => diaTemConteudo(d) || previsaoDoDia(d).length > 0);
+  const resumoPrev = {};
+  item.dias.forEach((d) => previsaoDoDia(d).forEach((p) => { resumoPrev[p] = (resumoPrev[p] || 0) + 1; }));
 
   return (
     <div style={{
@@ -4497,11 +4555,22 @@ function ProgramacaoCard({ item, livre = false, expandido, onToggle, onEditar, o
           {diasComConteudo.length === 0 && (
             <div style={{ fontSize: 12.5, color: "#8E8F96", marginTop: 14 }}>Nenhum exercício definido nesta programação.</div>
           )}
+          {Object.keys(resumoPrev).length > 0 && (
+            <div style={{ marginTop: 14, border: "1px dashed #E4DE0066", borderRadius: 10, padding: "9px 12px" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.08em", marginBottom: 4 }}>PREVISÃO DA SEMANA</div>
+              <div style={{ fontSize: 13, color: "#E6E4DE", lineHeight: 1.6 }}>{Object.entries(resumoPrev).sort((x, y) => y[1] - x[1]).map(([k, n]) => `${k} ${n}×`).join("  ·  ")}</div>
+            </div>
+          )}
           {diasComConteudo.map((d) => (
             <div key={d.dia} style={{ marginTop: 14 }}>
               <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12.5, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                 {NOMES_DIA[d.dia]}
               </div>
+              {previsaoDoDia(d).length > 0 && (
+                <div style={{ marginTop: 5, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {previsaoDoDia(d).map((p) => <span key={p} style={{ border: "1px dashed #E4DE00", color: "#E4DE00", borderRadius: 999, padding: "2px 9px", fontSize: 11.5, fontWeight: 700 }}>previsto: {p}</span>)}
+                </div>
+              )}
               {exerciciosDoDia(d).map((e, j) => (
                 <div key={j} style={{ marginTop: 5, fontSize: 13.5, lineHeight: 1.4 }}>
                   <span style={{ color: "#F1EFE9", fontWeight: 700 }}>{e.nome}</span>
