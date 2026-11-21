@@ -1070,6 +1070,19 @@ function Section({ title, icon, children, right }) {
     </div>
   );
 }
+// Pergunta da avaliação em destaque: título forte, cartão claro e barra amarela (antes ficava apagado no fundo)
+function FieldPergunta({ label, children }) {
+  const obrig = String(label).trim().endsWith("*");
+  const texto = String(label).replace(/\s*\*\s*$/, "");
+  return (
+    <div style={{ background: "#2A2B31", border: "1px solid #3E3F46", borderLeft: "4px solid #E4DE00", borderRadius: 12, padding: "14px 14px 14px", marginBottom: 14 }}>
+      <div style={{ fontSize: 16.5, fontWeight: 800, color: "#FFFFFF", lineHeight: 1.35, marginBottom: 10 }}>
+        {texto}{obrig && <span style={{ color: "#E4DE00", marginLeft: 5 }}>*</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
 function Field({ label, children }) {
   return (
     <div style={{ marginBottom: 12 }}>
@@ -5650,14 +5663,14 @@ function AvaliacaoPage({ onVoltar }) {
         ) : (
           <div style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 12, padding: 16 }}>
             <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, color: "#F1EFE9", textTransform: "uppercase", letterSpacing: "0.03em" }}>Avaliação de aptidão física</div>
-            <div style={{ fontSize: 12.5, color: "#8E8F96", margin: "6px 0 16px" }}>Responda com atenção. Campos com * são obrigatórios.</div>
-            <Field label="Nome completo *">
+            <div style={{ fontSize: 13.5, color: "#C9CAD0", margin: "6px 0 16px", lineHeight: 1.5 }}>Responda com atenção. Campos com <b style={{ color: "#E4DE00" }}>*</b> são obrigatórios.</div>
+            <FieldPergunta label="Nome completo *">
               <TextInput value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome" />
-            </Field>
+            </FieldPergunta>
             {perguntas.map((p) => (
-              <Field key={p.id} label={`${p.titulo}${p.obrigatoria ? " *" : ""}`}>
+              <FieldPergunta key={p.id} label={`${p.titulo}${p.obrigatoria ? " *" : ""}`}>
                 <PerguntaCampo p={p} valor={valores[p.id]} onChange={(v) => setValores({ ...valores, [p.id]: v })} />
-              </Field>
+              </FieldPergunta>
             ))}
             {termos.trim() && (
               <div style={{ marginTop: 6, marginBottom: 14 }}>
@@ -6557,7 +6570,7 @@ function ResultadosHybrid({ registros: todosRegistros, sessao }) {
   regsW.forEach((r) => {
     const k = normalizarTexto(r.nome);
     if (!k) return;
-    if (!nomesW[k]) nomesW[k] = { chave: k, nome: r.nome, n: 0, formato: r.dados?.formato || "FOR TIME" };
+    if (!nomesW[k]) nomesW[k] = { chave: k, nome: r.nome, n: 0, formato: r.dados?.formato || "FOR TIME", aptidao: r.dados?.aptidao || "Sem aptidão" };
     nomesW[k].n++;
   });
   const listaW = Object.values(nomesW).sort((a, b) => b.n - a.n || a.nome.localeCompare(b.nome, "pt-BR"));
@@ -6575,7 +6588,9 @@ function ResultadosHybrid({ registros: todosRegistros, sessao }) {
     if (!wAtivo) return <EmptyState text="Cadastre workouts nas abas Provas ou Específico para ver os gráficos." />;
     const seletor = (
       <Select value={wAtivo.chave} onChange={(e) => setWorkoutKey(e.target.value)} style={{ marginBottom: 12 }}>
-        {listaW.map((w) => <option key={w.chave} value={w.chave}>{w.nome} ({w.n})</option>)}
+        {[...new Set(listaW.map((w) => w.aptidao))].sort((x, y) => x.localeCompare(y, "pt-BR")).map((ap) => (
+          <optgroup key={ap} label={ap}>{listaW.filter((w) => w.aptidao === ap).map((w) => <option key={w.chave} value={w.chave}>{w.nome} ({w.n})</option>)}</optgroup>
+        ))}
       </Select>
     );
     if (modo === "equipe") {
@@ -6751,7 +6766,7 @@ function ResultadosHybrid({ registros: todosRegistros, sessao }) {
 /* ---------------------------- formulário de registro ---------------------------- */
 function RegistroHybridForm({ tipo, sessao, nomesSugeridos, salvando, onSalvar, onCancelar }) {
   const [f, setF] = useState({
-    data: dataISOLocal(new Date()), nome: "", evento: "", formato: "FOR TIME", tempo: "", reps: "", rx: "RX",
+    data: dataISOLocal(new Date()), nome: "", aptidao: "", evento: "", formato: "FOR TIME", tempo: "", reps: "", rx: "RX",
     descricao: "", carga: "", obs: "", tipoCorrida: TIPOS_CORRIDA[0], km: "", fc: "", categoria: CATEGORIAS_HYROX[0],
     segs: SEGMENTOS_HYROX.map(() => ""),
   });
@@ -6766,13 +6781,14 @@ function RegistroHybridForm({ tipo, sessao, nomesSugeridos, salvando, onSalvar, 
     if (!f.data) return setErro("Informe a data.");
     if (tipo === "prova" || tipo === "treino") {
       if (!f.nome.trim()) return setErro("Informe o nome do workout.");
+      if (!f.aptidao) return setErro("Escolha a aptidão principal do workout.");
       const amrap = f.formato === "AMRAP";
       const tempoSeg = parseTempo(f.tempo);
       const reps = Number(String(f.reps).replace(",", "."));
       if (amrap && (!f.reps.trim() || isNaN(reps))) return setErro("Informe as repetições (ex: 142).");
       if (!amrap && tempoSeg == null) return setErro("Informe o tempo no formato mm:ss (ex: 12:45).");
       return onSalvar({ ...base, nome: f.nome.trim(), dados: {
-        formato: f.formato, rx: f.rx, evento: f.evento.trim(), descricao: f.descricao.trim(), carga: f.carga.trim(), obs: f.obs.trim(),
+        aptidao: f.aptidao, formato: f.formato, rx: f.rx, evento: f.evento.trim(), descricao: f.descricao.trim(), carga: f.carga.trim(), obs: f.obs.trim(),
         ...(amrap ? { reps } : { tempoSeg }),
       } });
     }
@@ -6805,6 +6821,12 @@ function RegistroHybridForm({ tipo, sessao, nomesSugeridos, salvando, onSalvar, 
           <Field label={tipo === "prova" ? "Workout / prova" : "Workout fechado"}>
             <TextInput list="hy-nomes" value={f.nome} onChange={(e) => set("nome", e.target.value)} placeholder={tipo === "prova" ? "Ex: Workout 1 – Fran" : "Ex: Murph, Cindy, 5 rounds..."} />
             <datalist id="hy-nomes">{nomesSugeridos.map((n) => <option key={n} value={n} />)}</datalist>
+          </Field>
+          <Field label="Aptidão principal (organiza os workouts)">
+            <Select value={f.aptidao} onChange={(e) => set("aptidao", e.target.value)}>
+              <option value="">Escolha a aptidão…</option>
+              {APTIDOES_HYBRID.map((o) => <option key={o} value={o}>{o}</option>)}
+            </Select>
           </Field>
           {tipo === "prova" && <Field label="Evento (opcional)"><TextInput value={f.evento} onChange={(e) => set("evento", e.target.value)} placeholder="Ex: Campeonato Interno, Open" /></Field>}
           {tipo === "treino" && <Field label="Descrição do treino (opcional)"><TextArea value={f.descricao} onChange={(e) => set("descricao", e.target.value)} placeholder="Exercícios, reps, cargas..." /></Field>}
@@ -6873,7 +6895,7 @@ function RegistroHybridCard({ r, minha, onExcluir }) {
   if (r.tipo === "prova" || r.tipo === "treino") {
     const v = valorWorkout(r);
     destaque = v == null ? "—" : fmtWorkout(v, d.formato);
-    badges = [d.formato, d.rx].filter(Boolean);
+    badges = [d.aptidao, d.formato, d.rx].filter(Boolean);
     if (d.evento) linhas.push(`Evento: ${d.evento}`);
     if (d.carga) linhas.push(`Carga: ${d.carga}`);
     if (d.descricao) linhas.push(d.descricao);
@@ -6906,6 +6928,400 @@ function RegistroHybridCard({ r, minha, onExcluir }) {
   );
 }
 
+/* =================================================================
+   GRADUAÇÃO HYBRID · níveis (Básico, Intermediário, Avançado...) com requisitos por aptidão.
+   Para subir de nível é preciso cumprir TODOS os requisitos do nível anterior.
+   Testes valem por 6 meses (validade configurável): depois é hora de refazer.
+================================================================= */
+const APTIDOES_HYBRID = ["Empurrar", "Puxar", "Resistência muscular", "Resistência cardiovascular", "Potência", "Core", "Condicionamento", "Força", "Agilidade", "Skill"];
+const CORES_NIVEL = ["#4CAF6D", "#4B9EEA", "#9B6BD9", "#FF8A3D", "#E4DE00", "#E6483F", "#F1EFE9", "#8E8F96"];
+const TIPOS_REQ = {
+  reps_min: "Repetições mínimas",
+  tempo_max: "Fazer em até (tempo)",
+  tempo_min: "Aguentar pelo menos (tempo)",
+  feito: "Completar (sim/não)",
+};
+const GRAD_PADRAO = {
+  validadeMeses: 6,
+  niveis: [
+    {
+      id: "basico", nome: "Básico", cor: "#4CAF6D",
+      reqs: [
+        { id: "b1", aptidao: "Empurrar", nome: "Push up", tipo: "reps_min", meta: 20, detalhe: "Padrão" },
+        { id: "b2", aptidao: "Puxar", nome: "Pull up", tipo: "reps_min", meta: 5, detalhe: "Strict" },
+        { id: "b3", aptidao: "Resistência muscular", nome: "Squats", tipo: "tempo_max", meta: 180, detalhe: "200 squats em até 3 min" },
+        { id: "b4", aptidao: "Resistência cardiovascular", nome: "Corrida contínua 5 km", tipo: "feito", meta: null, detalhe: "5 km sem parar (tempo é opcional)" },
+        { id: "b5", aptidao: "Potência", nome: "Corrida de velocidade 3,2 km", tipo: "tempo_max", meta: 1080, estrito: true, detalhe: "3,2 km abaixo de 18 min" },
+        { id: "b6", aptidao: "Core", nome: "Prancha", tipo: "tempo_min", meta: 120, detalhe: "Segurar 2 min" },
+        { id: "b7", aptidao: "Condicionamento", nome: "30 Burpees", tipo: "tempo_max", meta: 480, detalhe: "30 burpees em até 8 min" },
+      ],
+    },
+    { id: "intermediario", nome: "Intermediário", cor: "#4B9EEA", reqs: [] },
+    { id: "avancado", nome: "Avançado", cor: "#9B6BD9", reqs: [] },
+  ],
+};
+
+const DIA_MS = 86400000;
+function cumpreRequisito(req, d) {
+  d = d || {};
+  if (req.tipo === "feito") return d.feito === true;
+  const v = d.valor;
+  if (typeof v !== "number" || isNaN(v) || typeof req.meta !== "number") return false;
+  if (req.tipo === "reps_min" || req.tipo === "tempo_min") return v >= req.meta;
+  if (req.tipo === "tempo_max") return req.estrito ? v < req.meta : v <= req.meta;
+  return false;
+}
+function fmtMetaReq(req) {
+  if (req.tipo === "feito") return "Completar";
+  if (typeof req.meta !== "number") return "Defina a meta";
+  if (req.tipo === "reps_min") return `${req.meta} reps ou mais`;
+  if (req.tipo === "tempo_min") return `mínimo ${fmtTempo(req.meta)}`;
+  return req.estrito ? `abaixo de ${fmtTempo(req.meta)}` : `em até ${fmtTempo(req.meta)}`;
+}
+function fmtResultadoReq(req, d) {
+  d = d || {};
+  if (req.tipo === "feito") return typeof d.valor === "number" ? `Feito · ${fmtTempo(d.valor)}` : "Feito";
+  if (typeof d.valor !== "number") return "—";
+  return req.tipo === "reps_min" ? `${d.valor} reps` : fmtTempo(d.valor);
+}
+const corTextoSobre = (hex) => {
+  const h = String(hex || "#888").replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+  const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  return lum > 0.6 ? "#0A0A0A" : "#FFFFFF";
+};
+const dataMs = (iso) => new Date(`${iso}T12:00:00`).getTime();
+
+// Calcula níveis, requisitos e validade de um atleta
+function calcularGraduacao(cfg, registros, atleta, agora = Date.now()) {
+  const validade = (cfg.validadeMeses || 6) * 30.4375 * DIA_MS;
+  const meus = registros.filter((r) => r.tipo === "teste" && normalizarTexto(r.atleta) === normalizarTexto(atleta));
+  const niveis = cfg.niveis.map((n) => ({
+    ...n,
+    reqs: (n.reqs || []).map((rq) => {
+      const tent = meus.filter((t) => t.dados && t.dados.reqId === rq.id).sort((a, b) => b.data.localeCompare(a.data) || String(b.criadoEm).localeCompare(String(a.criadoEm)));
+      const oks = tent.filter((t) => cumpreRequisito(rq, t.dados));
+      const ult = oks[0];
+      const venceMs = ult ? dataMs(ult.data) + validade : null;
+      let melhor = null;
+      tent.forEach((t) => {
+        const v = t.dados && t.dados.valor;
+        if (typeof v !== "number") return;
+        if (melhor === null) melhor = t;
+        else if (rq.tipo === "tempo_max" ? v < melhor.dados.valor : v > melhor.dados.valor) melhor = t;
+      });
+      return { req: rq, tentativas: tent, cumprido: !!ult, vigente: !!ult && agora <= venceMs, dataOk: ult ? ult.data : null, venceMs, melhor: ult ? (rq.tipo === "feito" ? ult : melhor) : melhor };
+    }),
+  }));
+  let nivelHist = -1, nivelVig = -1, travaH = false, travaV = false;
+  // nível sem requisitos antes de um nível com requisitos (ex.: "Iniciante") é ponto de partida: conta como concluído.
+  // Nível sem requisitos no fim da escada = "em desenvolvimento": ninguém o alcança ainda.
+  const ultimoComReq = niveis.reduce((m, n, i) => (n.reqs.length ? i : m), -1);
+  niveis.forEach((n, i) => {
+    const tem = n.reqs.length > 0;
+    const inicial = !tem && i < ultimoComReq;
+    n.completo = inicial || (tem && n.reqs.every((x) => x.cumprido));
+    n.completoVigente = inicial || (tem && n.reqs.every((x) => x.vigente));
+    n.cumpridosVig = n.reqs.filter((x) => x.vigente).length;
+    n.cumpridos = n.reqs.filter((x) => x.cumprido).length;
+    if (!travaH && n.completo) nivelHist = i; else travaH = true;
+    if (!travaV && n.completoVigente) nivelVig = i; else travaV = true;
+  });
+  niveis.forEach((n, i) => { n.liberado = i <= nivelHist + 1; });
+  const retestePendente = nivelHist > nivelVig;
+  let venceMs = null;
+  for (let i = 0; i <= nivelVig; i++) niveis[i].reqs.forEach((x) => { if (x.venceMs && (venceMs === null || x.venceMs < venceMs)) venceMs = x.venceMs; });
+  return { niveis, nivelHist, nivelVig, retestePendente, venceMs, proximo: niveis[nivelVig + 1] || null };
+}
+
+/* ---------------------------- banco: configuração dos níveis ---------------------------- */
+async function hybridConfigObterDb(codigo) {
+  const { data, error } = await supabase.rpc("hybrid_config_obter", { p_codigo: codigo });
+  if (error) { console.error(error); return null; }
+  return data && Array.isArray(data.niveis) ? data : null;
+}
+async function hybridConfigSalvarDb(senha, cfg) {
+  const { data, error } = await supabase.rpc("hybrid_config_salvar", { p_senha: senha, p_config: cfg });
+  if (error) { console.error(error); return false; }
+  return !!data;
+}
+async function hybridValidarSenhaDb(senha) {
+  const { data, error } = await supabase.rpc("hybrid_validar_senha", { p_senha: senha });
+  if (error) { console.error(error); return false; }
+  return !!data;
+}
+
+/* ---------------------------- faixa (visual de graduação) ---------------------------- */
+function FaixaGraduacao({ cor, nome, listras = 0, total = 0 }) {
+  const n = Math.min(Math.max(total, 0), 9);
+  return (
+    <div style={{ display: "flex", height: 44, borderRadius: 10, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.12)" }}>
+      <div style={{ flex: 1, background: cor, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Outfit', sans-serif", fontSize: 19, color: corTextoSobre(cor), letterSpacing: "0.02em" }}>{nome}</div>
+      <div style={{ minWidth: 64, background: "#0A0A0A", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "0 10px" }}>
+        {Array.from({ length: n }).map((_, i) => <span key={i} style={{ width: 5, height: 26, borderRadius: 2, background: i < listras ? "#F1EFE9" : "#34353B" }} />)}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------- formulário de teste ---------------------------- */
+function TesteHybridForm({ alvo, sessao, coach, atletas, salvando, onSalvar, onCancelar }) {
+  const { req, nivel } = alvo;
+  const [atleta, setAtleta] = useState(sessao.atleta);
+  const [data, setData] = useState(dataISOLocal(new Date()));
+  const [reps, setReps] = useState("");
+  const [tempo, setTempo] = useState("");
+  const [feito, setFeito] = useState(false);
+  const [obs, setObs] = useState("");
+  const [erro, setErro] = useState("");
+  const valor = req.tipo === "reps_min" ? (reps.trim() === "" ? null : Number(String(reps).replace(",", "."))) : parseTempo(tempo);
+  const dados = { feito: req.tipo === "feito" ? feito : undefined, valor: typeof valor === "number" && !isNaN(valor) ? valor : undefined };
+  const atingiu = cumpreRequisito(req, dados);
+  const salvar = () => {
+    if (!atleta.trim()) return setErro("Informe o atleta.");
+    if (req.tipo === "reps_min" && (dados.valor === undefined)) return setErro("Informe as repetições.");
+    if ((req.tipo === "tempo_max" || req.tipo === "tempo_min") && dados.valor === undefined) return setErro("Informe o tempo (digite só números: 345 vira 3:45).");
+    onSalvar({ atleta: atleta.trim(), data, nome: req.nome, dados: { reqId: req.id, nivelId: nivel.id, valor: dados.valor, feito: req.tipo === "feito" ? feito : undefined, por: coach ? "coach" : "atleta", obs: obs.trim() } });
+  };
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <span style={{ background: nivel.cor, color: corTextoSobre(nivel.cor), fontSize: 11, fontWeight: 800, borderRadius: 999, padding: "3px 10px" }}>{nivel.nome}</span>
+        <span style={{ fontSize: 12, color: "#8E8F96" }}>{req.aptidao}</span>
+      </div>
+      <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, color: "#FFFFFF" }}>{req.nome}</div>
+      <div style={{ fontSize: 13.5, color: "#E4DE00", fontWeight: 700, marginTop: 4 }}>Meta: {fmtMetaReq(req)}</div>
+      {req.detalhe && <div style={{ fontSize: 12.5, color: "#B9BABF", marginTop: 2, marginBottom: 14 }}>{req.detalhe}</div>}
+      {coach ? (
+        <Field label="Atleta (você está no modo treinador)">
+          <TextInput list="gr-atletas" value={atleta} onChange={(e) => setAtleta(e.target.value)} />
+          <datalist id="gr-atletas">{atletas.map((a) => <option key={a} value={a} />)}</datalist>
+        </Field>
+      ) : <div style={{ fontSize: 12.5, color: "#9A9BA2", marginBottom: 10 }}>Atleta: <b style={{ color: "#E4DE00" }}>{sessao.atleta}</b></div>}
+      <Field label="Data do teste"><TextInput type="date" value={data} onChange={(e) => setData(e.target.value)} style={estiloDataHora} /></Field>
+      {req.tipo === "reps_min" && <Field label="Repetições feitas"><TextInput inputMode="numeric" value={reps} onChange={(e) => setReps(e.target.value)} placeholder="Ex: 22" /></Field>}
+      {(req.tipo === "tempo_max" || req.tipo === "tempo_min") && <><Field label="Tempo (mm:ss)"><TempoInput value={tempo} onChange={setTempo} placeholder="Ex: 2:45" /></Field><DicaTempo /></>}
+      {req.tipo === "feito" && (
+        <>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 15, color: "#F1EFE9", fontWeight: 700, marginBottom: 12, cursor: "pointer" }}>
+            <input type="checkbox" checked={feito} onChange={(e) => setFeito(e.target.checked)} style={{ width: 20, height: 20 }} /> Consegui completar
+          </label>
+          <Field label="Tempo (opcional)"><TempoInput value={tempo} onChange={setTempo} placeholder="Ex: 28:30" /></Field>
+        </>
+      )}
+      <Field label="Observações (opcional)"><TextInput value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Como foi, padrão do movimento..." /></Field>
+      <div style={{ fontSize: 14, fontWeight: 800, color: atingiu ? "#4CAF6D" : "#FF8A3D", marginBottom: 12 }}>
+        {atingiu ? "✓ Meta atingida" : (valor != null || req.tipo === "feito") ? "Ainda não atingiu a meta (o teste fica registrado mesmo assim)" : ""}
+      </div>
+      {erro && <div style={{ color: "#E6483F", fontSize: 12.5, marginBottom: 10 }}>{erro}</div>}
+      <div style={{ display: "flex", gap: 10 }}>
+        <GhostButton onClick={onCancelar} style={{ flex: 1 }}>Cancelar</GhostButton>
+        <PrimaryButton onClick={salvar} disabled={salvando} style={{ flex: 2 }}><Save size={16} /> {salvando ? "Salvando..." : "Registrar teste"}</PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------- editor de níveis e requisitos (treinador) ---------------------------- */
+function EditorNiveisHybrid({ cfg, salvando, onSalvar, onCancelar }) {
+  const [c, setC] = useState(() => JSON.parse(JSON.stringify(cfg)));
+  const setNivel = (id, k, v) => setC({ ...c, niveis: c.niveis.map((n) => (n.id === id ? { ...n, [k]: v } : n)) });
+  const mover = (i, d) => {
+    const j = i + d;
+    if (j < 0 || j >= c.niveis.length) return;
+    const arr = [...c.niveis]; [arr[i], arr[j]] = [arr[j], arr[i]];
+    setC({ ...c, niveis: arr });
+  };
+  const setReq = (nid, rid, patch) => setC({ ...c, niveis: c.niveis.map((n) => (n.id !== nid ? n : { ...n, reqs: n.reqs.map((r) => (r.id === rid ? { ...r, ...patch } : r)) })) });
+  const rmReq = (nid, rid) => setC({ ...c, niveis: c.niveis.map((n) => (n.id !== nid ? n : { ...n, reqs: n.reqs.filter((r) => r.id !== rid) })) });
+  const addReq = (nid) => setC({ ...c, niveis: c.niveis.map((n) => (n.id !== nid ? n : { ...n, reqs: [...n.reqs, { id: uid(), aptidao: "", nome: "", tipo: "reps_min", meta: null, detalhe: "" }] })) });
+  const addNivel = () => setC({ ...c, niveis: [...c.niveis, { id: uid(), nome: "Novo nível", cor: CORES_NIVEL[c.niveis.length % CORES_NIVEL.length], reqs: [] }] });
+  const rmNivel = (n) => { if (window.confirm(`Remover o nível "${n.nome}" e seus requisitos? (Os testes já registrados não são apagados.)`)) setC({ ...c, niveis: c.niveis.filter((x) => x.id !== n.id) }); };
+  const salvar = () => {
+    const limpo = { ...c, niveis: c.niveis.map((n) => ({ ...n, nome: n.nome.trim() || "Nível", reqs: n.reqs.filter((r) => r.nome.trim()).map((r) => ({ ...r, nome: r.nome.trim(), aptidao: (r.aptidao || "").trim(), detalhe: (r.detalhe || "").trim() })) })) };
+    onSalvar(limpo);
+  };
+  const sub = { fontSize: 11, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.1em", margin: "14px 0 6px" };
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, color: "#B9BABF", lineHeight: 1.55, marginBottom: 12 }}>
+        A ordem de cima para baixo é a ordem da graduação: o aluno só libera um nível depois de cumprir <b>todos</b> os requisitos do anterior. Use ↑ ↓ para encaixar novos níveis (Elite acima, Iniciante abaixo...).
+      </div>
+      <Field label="Validade dos testes (meses) — depois disso é hora de refazer">
+        <TextInput inputMode="numeric" value={String(c.validadeMeses ?? 6)} onChange={(e) => setC({ ...c, validadeMeses: Math.max(1, Number(e.target.value.replace(/\D/g, "")) || 1) })} />
+      </Field>
+      {c.niveis.map((n, i) => (
+        <div key={n.id} style={{ background: "#1C1D20", border: `1px solid ${n.cor}88`, borderLeft: `5px solid ${n.cor}`, borderRadius: 12, padding: 12, marginTop: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+            <TextInput value={n.nome} onChange={(e) => setNivel(n.id, "nome", e.target.value)} style={{ flex: 1, fontWeight: 800 }} />
+            <ChevronUp size={22} color={i === 0 ? "#3A3B40" : "#B9BABF"} style={{ cursor: "pointer" }} onClick={() => mover(i, -1)} />
+            <ChevronDown size={22} color={i === c.niveis.length - 1 ? "#3A3B40" : "#B9BABF"} style={{ cursor: "pointer" }} onClick={() => mover(i, 1)} />
+            <Trash2 size={18} color="#E6483F" style={{ cursor: "pointer" }} onClick={() => rmNivel(n)} />
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+            {CORES_NIVEL.map((cor) => <span key={cor} onClick={() => setNivel(n.id, "cor", cor)} style={{ width: 26, height: 26, borderRadius: 13, background: cor, cursor: "pointer", border: n.cor === cor ? "3px solid #FFFFFF" : "2px solid #34353B" }} />)}
+          </div>
+          <div style={sub}>REQUISITOS ({n.reqs.length})</div>
+          {n.reqs.length === 0 && <div style={{ fontSize: 12.5, color: "#8E8F96", marginBottom: 8 }}>Sem requisitos ainda: o nível aparece como "em desenvolvimento".</div>}
+          {n.reqs.map((r) => (
+            <div key={r.id} style={{ background: "#26272C", border: "1px solid #34353B", borderRadius: 10, padding: 10, marginBottom: 8 }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <TextInput list="gr-apt" value={r.aptidao} onChange={(e) => setReq(n.id, r.id, { aptidao: e.target.value })} placeholder="Aptidão" style={{ flex: 1 }} />
+                <Trash2 size={18} color="#E6483F" style={{ cursor: "pointer", alignSelf: "center" }} onClick={() => rmReq(n.id, r.id)} />
+              </div>
+              <TextInput value={r.nome} onChange={(e) => setReq(n.id, r.id, { nome: e.target.value })} placeholder="Exercício / teste (ex: Pull up)" style={{ marginBottom: 8 }} />
+              <Select value={r.tipo} onChange={(e) => setReq(n.id, r.id, { tipo: e.target.value, meta: null })} style={{ marginBottom: 8 }}>
+                {Object.entries(TIPOS_REQ).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </Select>
+              {r.tipo === "reps_min" && <TextInput inputMode="numeric" value={r.meta == null ? "" : String(r.meta)} onChange={(e) => setReq(n.id, r.id, { meta: e.target.value.trim() === "" ? null : Number(e.target.value.replace(/\D/g, "")) })} placeholder="Repetições mínimas" style={{ marginBottom: 8 }} />}
+              {(r.tipo === "tempo_max" || r.tipo === "tempo_min") && <TempoInput value={r.meta == null ? "" : fmtTempo(r.meta)} onChange={(v) => setReq(n.id, r.id, { meta: v ? parseTempo(v) : null })} placeholder="Tempo da meta (digite só números)" style={{ marginBottom: 8 }} />}
+              {r.tipo === "tempo_max" && (
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#B9BABF", marginBottom: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={!!r.estrito} onChange={(e) => setReq(n.id, r.id, { estrito: e.target.checked })} /> "Sub": precisa ser abaixo do tempo (não igual)
+                </label>
+              )}
+              <TextInput value={r.detalhe || ""} onChange={(e) => setReq(n.id, r.id, { detalhe: e.target.value })} placeholder="Detalhe / padrão (ex: Strict, 200 reps)" />
+            </div>
+          ))}
+          <GhostButton onClick={() => addReq(n.id)} style={{ width: "100%" }}><Plus size={14} /> Requisito</GhostButton>
+        </div>
+      ))}
+      <datalist id="gr-apt">{APTIDOES_HYBRID.map((a) => <option key={a} value={a} />)}</datalist>
+      <GhostButton onClick={addNivel} style={{ width: "100%", marginTop: 14 }}><Plus size={15} /> Novo nível (Elite, Iniciante...)</GhostButton>
+      <PrimaryButton onClick={salvar} disabled={salvando} style={{ width: "100%", marginTop: 12 }}><Save size={16} /> {salvando ? "Salvando..." : "Salvar graduação"}</PrimaryButton>
+    </div>
+  );
+}
+
+/* ---------------------------- aba GRADUAÇÃO ---------------------------- */
+function GraduacaoHybrid({ cfg, registros, sessao, coach, onTeste, onEditar, onAtivarCoach, onSairCoach, onExcluir }) {
+  const [abertos, setAbertos] = useState({});
+  const [tentAbertas, setTentAbertas] = useState({});
+  const g = calcularGraduacao(cfg, registros, sessao.atleta);
+  const nivelAtual = g.nivelVig >= 0 ? g.niveis[g.nivelVig] : null;
+  const alvo = g.proximo;
+  const fmtData = (ms) => new Date(ms).toLocaleDateString("pt-BR");
+  const diasAte = (ms) => Math.ceil((ms - Date.now()) / DIA_MS);
+  const abertoPadrao = (n, i) => abertos[n.id] ?? (alvo ? n.id === alvo.id : i === g.niveis.length - 1);
+
+  // mural: quem está em cada nível
+  const nomes = [...new Map(registros.map((r) => [normalizarTexto(r.atleta), r.atleta])).values()];
+  const mural = nomes.map((nm) => ({ nome: nm, grad: calcularGraduacao(cfg, registros, nm) }));
+  const grupos = [...cfg.niveis.map((n, i) => ({ nivel: n, idx: i, pessoas: mural.filter((m) => m.grad.nivelVig === i) })).reverse(), { nivel: null, idx: -1, pessoas: mural.filter((m) => m.grad.nivelVig === -1) }];
+
+  return (
+    <div>
+      {/* Sua graduação */}
+      <div style={{ ...cardHy, padding: 16, borderTop: `4px solid ${nivelAtual ? nivelAtual.cor : "#3A3B40"}` }}>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "#9A9BA2", letterSpacing: "0.12em", marginBottom: 10 }}>SUA GRADUAÇÃO · {sessao.atleta.toUpperCase()}</div>
+        <FaixaGraduacao cor={nivelAtual ? nivelAtual.cor : "#4A4B52"} nome={nivelAtual ? nivelAtual.nome : "Em formação"} listras={alvo ? alvo.cumpridosVig : 0} total={alvo ? alvo.reqs.length : 0} />
+        <div style={{ marginTop: 12, fontSize: 14.5, color: "#E6E4DE", lineHeight: 1.55 }}>
+          {alvo && alvo.reqs.length > 0 ? (
+            <>Próximo: <b style={{ color: alvo.cor }}>{alvo.nome}</b> · <b>{alvo.cumpridosVig}</b> de {alvo.reqs.length} requisitos cumpridos</>
+          ) : alvo ? (<>O nível <b style={{ color: alvo.cor }}>{alvo.nome}</b> ainda está em desenvolvimento.</>) : (<>Você chegou ao topo da graduação. 🏆</>)}
+        </div>
+        {g.retestePendente && <div style={{ marginTop: 10, background: "rgba(255,138,61,0.12)", border: "1px solid #FF8A3D88", borderRadius: 10, padding: "9px 12px", fontSize: 13, color: "#FFB27A", lineHeight: 1.5 }}>⏳ Reteste pendente: alguns testes passaram de {cfg.validadeMeses} meses. Refaça os requisitos marcados em laranja para recuperar seu nível.</div>}
+        {g.venceMs && !g.retestePendente && <div style={{ marginTop: 10, fontSize: 12.5, color: "#9A9BA2" }}>Reteste até <b style={{ color: "#F1EFE9" }}>{fmtData(g.venceMs)}</b> ({diasAte(g.venceMs)} dias) · refaça os testes a cada {cfg.validadeMeses} meses.</div>}
+      </div>
+
+      {/* Escada de níveis */}
+      <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, color: "#FFFFFF", margin: "20px 0 10px" }}>Níveis e requisitos</div>
+      {g.niveis.map((n, i) => {
+        const aberto = abertoPadrao(n, i);
+        const completo = n.completoVigente;
+        return (
+          <div key={n.id} style={{ ...cardHy, padding: 0, overflow: "hidden", borderLeft: `5px solid ${n.cor}`, opacity: n.liberado || coach ? 1 : 0.8 }}>
+            <button onClick={() => setAbertos({ ...abertos, [n.id]: !aberto })} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer", padding: "14px 14px", textAlign: "left" }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: "block", fontFamily: "'Outfit', sans-serif", fontSize: 18, color: "#FFFFFF" }}>{n.nome}</span>
+                <span style={{ display: "block", fontSize: 12.5, color: "#9A9BA2", marginTop: 2 }}>
+                  {n.reqs.length === 0 ? "Em desenvolvimento" : completo ? "✓ Nível concluído" : !n.liberado ? `🔒 Conclua ${g.niveis[i - 1] ? g.niveis[i - 1].nome : "o anterior"} para liberar` : `${n.cumpridosVig} de ${n.reqs.length} requisitos`}
+                </span>
+              </span>
+              {n.reqs.length > 0 && <span style={{ fontSize: 12, fontWeight: 800, color: corTextoSobre(n.cor), background: n.cor, borderRadius: 999, padding: "3px 10px" }}>{n.cumpridosVig}/{n.reqs.length}</span>}
+              {aberto ? <ChevronUp size={20} color="#B9BABF" /> : <ChevronDown size={20} color="#B9BABF" />}
+            </button>
+            {aberto && (
+              <div style={{ padding: "0 12px 12px" }}>
+                {n.reqs.length === 0 && <div style={{ fontSize: 13, color: "#8E8F96", padding: "4px 2px 6px" }}>O treinador ainda vai definir os requisitos deste nível.</div>}
+                {n.reqs.map((x) => {
+                  const rq = x.req;
+                  const estado = x.vigente ? "ok" : x.cumprido ? "vencido" : "pendente";
+                  const cor = estado === "ok" ? "#4CAF6D" : estado === "vencido" ? "#FF8A3D" : "#6F7076";
+                  const tAberta = !!tentAbertas[rq.id];
+                  return (
+                    <div key={rq.id} style={{ background: "#26272C", border: `1px solid ${estado === "pendente" ? "#34353B" : cor + "88"}`, borderRadius: 12, padding: "11px 12px", marginTop: 8 }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                        <span style={{ width: 24, height: 24, borderRadius: 12, background: estado === "pendente" ? "transparent" : cor, border: `2px solid ${cor}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                          {estado === "ok" && <Check size={14} color="#0A0A0A" />}
+                          {estado === "vencido" && <span style={{ fontSize: 12 }}>⏳</span>}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.08em", textTransform: "uppercase" }}>{rq.aptidao || "Aptidão"}</div>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: "#FFFFFF", marginTop: 2 }}>{rq.nome}</div>
+                          <div style={{ fontSize: 13, color: "#D0D1D6", marginTop: 2 }}>Meta: <b>{fmtMetaReq(rq)}</b>{rq.detalhe ? <span style={{ color: "#9A9BA2" }}> · {rq.detalhe}</span> : null}</div>
+                          {x.melhor && <div style={{ fontSize: 12.5, color: "#B9BABF", marginTop: 4 }}>Melhor: <b style={{ color: "#F1EFE9" }}>{fmtResultadoReq(rq, x.melhor.dados)}</b> · {dataCurtaHy(x.melhor.data)}{x.melhor.dados && x.melhor.dados.por === "coach" ? " · ✓ treinador" : ""}</div>}
+                          {estado === "ok" && x.venceMs && <div style={{ fontSize: 12, color: "#4CAF6D", marginTop: 3 }}>Vale até {fmtData(x.venceMs)}</div>}
+                          {estado === "vencido" && <div style={{ fontSize: 12, color: "#FF8A3D", marginTop: 3, fontWeight: 700 }}>Venceu em {fmtData(x.venceMs)} · refaça o teste</div>}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                        {(n.liberado || coach) && <button onClick={() => onTeste(rq, n)} style={{ flex: 1, cursor: "pointer", background: estado === "ok" ? "none" : "#E4DE00", color: estado === "ok" ? "#E4DE00" : "#0A0A0A", border: "1px solid #E4DE00", borderRadius: 10, padding: "9px 10px", fontSize: 13.5, fontWeight: 800 }}>{estado === "ok" ? "Refazer teste" : estado === "vencido" ? "Refazer agora" : "Registrar teste"}</button>}
+                        {x.tentativas.length > 0 && <button onClick={() => setTentAbertas({ ...tentAbertas, [rq.id]: !tAberta })} style={{ cursor: "pointer", background: "none", border: "1px solid #3A3B40", color: "#B9BABF", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 700 }}>{tAberta ? "Ocultar" : `Tentativas (${x.tentativas.length})`}</button>}
+                      </div>
+                      {tAberta && x.tentativas.map((t) => (
+                        <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#D0D1D6", padding: "6px 0", borderTop: "1px solid #34353B", marginTop: 6 }}>
+                          <span style={{ width: 52, color: "#8E8F96" }}>{dataCurtaHy(t.data)}</span>
+                          <span style={{ flex: 1 }}><b>{fmtResultadoReq(rq, t.dados)}</b> {cumpreRequisito(rq, t.dados) ? <span style={{ color: "#4CAF6D" }}>✓</span> : <span style={{ color: "#8E8F96" }}>não atingiu</span>}{t.dados && t.dados.por === "coach" ? " · treinador" : ""}</span>
+                          <Trash2 size={14} color="#8E8F96" style={{ cursor: "pointer" }} onClick={() => onExcluir(t)} />
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Quem está com você */}
+      <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, color: "#FFFFFF", margin: "24px 0 4px" }}>Quem está com você</div>
+      <div style={{ fontSize: 12, color: "#8E8F96", marginBottom: 10 }}>Os graduados da equipe, por nível.</div>
+      {grupos.map(({ nivel, idx, pessoas }) => (
+        <div key={nivel ? nivel.id : "formacao"} style={{ ...cardHy, padding: "12px 14px", borderLeft: `5px solid ${nivel ? nivel.cor : "#4A4B52"}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: pessoas.length ? 10 : 0 }}>
+            <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, color: "#FFFFFF", flex: 1 }}>{nivel ? nivel.nome : "Em formação"}</span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: "#B9BABF" }}>{pessoas.length}</span>
+          </div>
+          {pessoas.length === 0 ? <div style={{ fontSize: 12, color: "#6F7076", marginTop: 6 }}>Ninguém ainda{nivel ? ". Você pode ser o primeiro!" : "."}</div> : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {pessoas.map((p) => {
+                const eu = normalizarTexto(p.nome) === normalizarTexto(sessao.atleta);
+                return <span key={p.nome} style={{ fontSize: 13, fontWeight: eu ? 800 : 600, color: eu ? "#0A0A0A" : "#F1EFE9", background: eu ? "#E4DE00" : "#26272C", border: `1px solid ${eu ? "#E4DE00" : "#3A3B40"}`, borderRadius: 999, padding: "5px 11px" }}>{p.nome}{p.grad.retestePendente ? " ⏳" : ""}</span>;
+              })}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Treinador */}
+      <div style={{ marginTop: 22, textAlign: "center" }}>
+        {coach ? (
+          <>
+            <PrimaryButton onClick={onEditar} style={{ width: "100%" }}><SlidersHorizontal size={15} /> Editar níveis e requisitos</PrimaryButton>
+            <button onClick={onSairCoach} style={{ background: "none", border: "none", color: "#8E8F96", fontSize: 12, marginTop: 10, cursor: "pointer", textDecoration: "underline" }}>Sair do modo treinador</button>
+            <div style={{ fontSize: 11.5, color: "#8E8F96", marginTop: 6 }}>No modo treinador, "Registrar teste" permite escolher qualquer atleta.</div>
+          </>
+        ) : (
+          <button onClick={onAtivarCoach} style={{ background: "none", border: "none", color: "#8E8F96", fontSize: 12.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}><Lock size={12} /> Modo treinador</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 const INFO_ABAS_HYBRID = {
   prova: { titulo: "WORKOUTS · TEMPO DE CADA PROVA", ajuda: "Registre o tempo (ou reps) de cada workout de prova.", vazio: "Nenhum tempo de prova registrado ainda." },
   treino: { titulo: "TREINO ESPECÍFICO", ajuda: "Workouts fechados: use o mesmo nome para comparar a evolução e a equipe.", vazio: "Nenhum treino específico registrado ainda." },
@@ -6915,20 +7331,31 @@ const INFO_ABAS_HYBRID = {
 
 function ListaHybrid({ tipo, registros, sessao, onNovo, onExcluir }) {
   const [soMeus, setSoMeus] = useState(false);
+  const [apt, setApt] = useState("");
   const info = INFO_ABAS_HYBRID[tipo];
   const meu = (r) => normalizarTexto(r.atleta) === normalizarTexto(sessao.atleta);
-  const lista = registros
-    .filter((r) => r.tipo === tipo && (!soMeus || meu(r)))
-    .sort((a, b) => b.data.localeCompare(a.data) || String(b.criadoEm).localeCompare(String(a.criadoEm)));
+  const comApt = tipo === "prova" || tipo === "treino";
+  const aptDe = (r) => (r.dados && r.dados.aptidao) || "Sem aptidão";
+  const doTipo = registros.filter((r) => r.tipo === tipo);
+  const aptidoes = comApt ? [...new Set(doTipo.map(aptDe))].sort((x, y) => x.localeCompare(y, "pt-BR")) : [];
+  const lista = doTipo
+    .filter((r) => (!soMeus || meu(r)) && (!apt || aptDe(r) === apt))
+    .sort((x, y) => y.data.localeCompare(x.data) || String(y.criadoEm).localeCompare(String(x.criadoEm)));
   return (
     <div>
       <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, color: "#E4DE00", letterSpacing: "0.04em" }}>{info.titulo}</div>
       <div style={{ fontSize: 12, color: "#8E8F96", margin: "4px 0 12px", lineHeight: 1.4 }}>{info.ajuda}</div>
       <PrimaryButton onClick={onNovo} style={{ width: "100%", marginBottom: 12 }}><Plus size={16} /> Novo registro</PrimaryButton>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
         <button onClick={() => setSoMeus(false)} style={chipHy(!soMeus)}>Todos</button>
         <button onClick={() => setSoMeus(true)} style={chipHy(soMeus)}>Meus</button>
       </div>
+      {comApt && aptidoes.length > 0 && (
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 12 }}>
+          <button onClick={() => setApt("")} style={chipHy(apt === "")}>Todas as aptidões</button>
+          {aptidoes.map((x) => <button key={x} onClick={() => setApt(apt === x ? "" : x)} style={chipHy(apt === x)}>{x}</button>)}
+        </div>
+      )}
       {lista.length === 0 ? <EmptyState text={info.vazio} /> : lista.map((r) => <RegistroHybridCard key={r.id} r={r} minha={meu(r)} onExcluir={onExcluir} />)}
     </div>
   );
@@ -6958,11 +7385,11 @@ function AcessoHybrid({ onEntrar, erro, entrando, inicial }) {
 
 /* ---------------------------- tela principal da pasta ---------------------------- */
 const ABAS_HYBRID = [
+  { id: "graduacao", label: "Graduação", icon: Trophy },
   { id: "resultados", label: "Resultados", icon: BarChart3 },
-  { id: "prova", label: "Provas", icon: Timer },
+  { id: "prova", label: "Provas", icon: Timer }, // Workouts + simulados HYROX (sub prova)
   { id: "treino", label: "Específico", icon: Target },
   { id: "corrida", label: "Corrida", icon: Activity },
-  { id: "hyrox", label: "Hyrox", icon: Trophy },
 ];
 
 function HybridCantil() {
@@ -6971,8 +7398,13 @@ function HybridCantil() {
   const [carregando, setCarregando] = useState(!!lerSessaoHybrid());
   const [entrando, setEntrando] = useState(false);
   const [erroAcesso, setErroAcesso] = useState("");
-  const [aba, setAba] = useState("resultados");
+  const [aba, setAba] = useState("graduacao");
   const [novoTipo, setNovoTipo] = useState(null);
+  const [cfg, setCfg] = useState(GRAD_PADRAO);
+  const [coachSenha, setCoachSenha] = useState("");
+  const [testeAlvo, setTesteAlvo] = useState(null);
+  const [editorAberto, setEditorAberto] = useState(false);
+  const [subProva, setSubProva] = useState("workouts");
   const [salvando, setSalvando] = useState(false);
   const [toast, setToast] = useState("");
   const mostrarToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
@@ -6990,6 +7422,41 @@ function HybridCantil() {
     (async () => { await carregar(sessao); setCarregando(false); })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aba]);
+
+  useEffect(() => {
+    if (!sessao) return;
+    (async () => { const c = await hybridConfigObterDb(sessao.codigo); if (c) setCfg(c); })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessao && sessao.codigo]);
+
+  const ativarCoach = async () => {
+    const s = window.prompt("Senha do treinador:");
+    if (!s) return;
+    const ok = await hybridValidarSenhaDb(s);
+    if (ok) { setCoachSenha(s); mostrarToast("Modo treinador ativado"); }
+    else mostrarToast("Senha incorreta (ou falta rodar o hybrid_graduacao.sql)");
+  };
+  const salvarTeste = async (t) => {
+    if (salvando) return;
+    setSalvando(true);
+    const equipe = (registros.find((r) => normalizarTexto(r.atleta) === normalizarTexto(t.atleta)) || {}).equipe || sessao.equipe;
+    const novo = await hybridSalvarDb(sessao.codigo, { tipo: "teste", atleta: t.atleta, equipe, nome: t.nome, data: t.data, dados: t.dados });
+    setSalvando(false);
+    if (!novo) { mostrarToast("Não consegui salvar o teste. Rode o hybrid_graduacao.sql no Supabase."); return; }
+    const bateu = testeAlvo && cumpreRequisito(testeAlvo.req, t.dados);
+    setRegistros((prev) => [novo, ...prev]);
+    setTesteAlvo(null);
+    mostrarToast(bateu ? "Teste registrado: meta atingida! 🎉" : "Teste registrado");
+  };
+  const salvarConfig = async (c) => {
+    setSalvando(true);
+    const ok = await hybridConfigSalvarDb(coachSenha, c);
+    setSalvando(false);
+    if (!ok) { mostrarToast("Não consegui salvar (senha ou falta rodar o hybrid_graduacao.sql)"); return; }
+    setCfg(c);
+    setEditorAberto(false);
+    mostrarToast("Graduação atualizada");
+  };
 
   const entrar = async (s) => {
     setEntrando(true);
@@ -7055,9 +7522,23 @@ function HybridCantil() {
         {carregando ? <Spinner /> : (
           <>
             {erroAcesso && <div style={{ color: "#FF8A3D", fontSize: 12.5, marginBottom: 10 }}>{erroAcesso}</div>}
-            {aba === "resultados"
-              ? <ResultadosHybrid registros={registros} sessao={sessao} />
-              : <ListaHybrid tipo={aba} registros={registros} sessao={sessao} onNovo={() => setNovoTipo(aba)} onExcluir={excluir} />}
+            {aba === "graduacao" ? (
+              <GraduacaoHybrid cfg={cfg} registros={registros} sessao={sessao} coach={!!coachSenha}
+                onTeste={(req, nivel) => setTesteAlvo({ req, nivel })} onEditar={() => setEditorAberto(true)}
+                onAtivarCoach={ativarCoach} onSairCoach={() => setCoachSenha("")} onExcluir={excluir} />
+            ) : aba === "resultados" ? (
+              <ResultadosHybrid registros={registros} sessao={sessao} />
+            ) : aba === "prova" ? (
+              <>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                  <button onClick={() => setSubProva("workouts")} style={chipHy(subProva === "workouts")}>Workouts</button>
+                  <button onClick={() => setSubProva("hyrox")} style={chipHy(subProva === "hyrox")}>Simulados HYROX</button>
+                </div>
+                <ListaHybrid key={subProva} tipo={subProva === "hyrox" ? "hyrox" : "prova"} registros={registros} sessao={sessao} onNovo={() => setNovoTipo(subProva === "hyrox" ? "hyrox" : "prova")} onExcluir={excluir} />
+              </>
+            ) : (
+              <ListaHybrid key={aba} tipo={aba} registros={registros} sessao={sessao} onNovo={() => setNovoTipo(aba)} onExcluir={excluir} />
+            )}
           </>
         )}
       </div>
@@ -7065,6 +7546,18 @@ function HybridCantil() {
       {novoTipo && (
         <Sheet title={INFO_ABAS_HYBRID[novoTipo].titulo} onClose={() => setNovoTipo(null)}>
           <RegistroHybridForm tipo={novoTipo} sessao={sessao} nomesSugeridos={nomesSugeridos} salvando={salvando} onSalvar={salvar} onCancelar={() => setNovoTipo(null)} />
+        </Sheet>
+      )}
+      {testeAlvo && (
+        <Sheet title="Registrar teste" onClose={() => setTesteAlvo(null)}>
+          <TesteHybridForm alvo={testeAlvo} sessao={sessao} coach={!!coachSenha}
+            atletas={[...new Map(registros.map((r) => [normalizarTexto(r.atleta), r.atleta])).values()].sort((x, y) => x.localeCompare(y, "pt-BR"))}
+            salvando={salvando} onSalvar={salvarTeste} onCancelar={() => setTesteAlvo(null)} />
+        </Sheet>
+      )}
+      {editorAberto && (
+        <Sheet title="Editar graduação" onClose={() => setEditorAberto(false)}>
+          <EditorNiveisHybrid cfg={cfg} salvando={salvando} onSalvar={salvarConfig} onCancelar={() => setEditorAberto(false)} />
         </Sheet>
       )}
       <Toast text={toast} />
