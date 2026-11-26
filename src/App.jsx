@@ -2604,6 +2604,142 @@ function ResultadoSheet({ w, inicial, salvando, onSalvar, onFechar }) {
   );
 }
 
+/* =================================================================
+   BUSCA DOS WORKOUTS · procura em TODOS os campos (nome, código, data, tags, protocolo, warm ups,
+   skill, cada bloco, objetivos, treino e resultados). Ignora acento e maiúscula, aceita várias
+   palavras (todas precisam aparecer), "frase exata" entre aspas, plural/singular, e ordena por relevância.
+================================================================= */
+const foldTxt = (s) => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const foldAlnum = (s) => foldTxt(s).replace(/[^a-z0-9]/g, " "); // mesmo tamanho do original (para achar o trecho)
+const colapsaEsp = (s) => s.replace(/ +/g, " ").trim();
+const MESES_LONGOS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const INDICE_BUSCA = new Map();
+function indexarWorkout(w, protocolos) {
+  const prot = (protocolos || []).find((p) => p.id === w.protocoloId);
+  const chave = `${w.id}|${w.atualizadoEm || ""}|${prot ? prot.titulo : ""}|${(w.resultados || []).length}|${(w.blocos || []).length}`;
+  const cache = INDICE_BUSCA.get(w.id);
+  if (cache && cache.chave === chave) return cache.entradas;
+  const ent = [];
+  const add = (campo, peso, texto) => {
+    const t = String(texto ?? "").trim();
+    if (t) ent.push({ campo, peso, texto: t, n: colapsaEsp(foldAlnum(t)) });
+  };
+  add("Nome", 10, w.nome); add("Código", 9, w.codigo); add("Tags", 8, w.tags); add("Categoria", 6, w.categoria);
+  if (prot) add("Protocolo", 6, prot.titulo);
+  add("Skill", 5, w.skill); add("Warm up geral", 3, w.warmupGeral); add("Warm up específico", 3, w.warmupEspecifico);
+  if (w.data) {
+    const [y, m, d] = String(w.data).slice(0, 10).split("-");
+    add("Data", 4, `${w.data} ${d}/${m}/${y} ${Number(d)} de ${MESES_LONGOS[Number(m) - 1] || ""} de ${y} ${MESES_ABREV[Number(m) - 1] || ""}`);
+  }
+  const nomes = { titulo: ["título", 6], objetivos: ["objetivos", 5], conteudo: ["treino", 4], nivel: ["nível", 2] };
+  (w.blocos || []).forEach((b, i) => {
+    Object.entries(b || {}).forEach(([k, v]) => {
+      if (typeof v !== "string" || k === "id") return;
+      const [rot, peso] = nomes[k] || [k, 3];
+      add(`Bloco ${i + 1} · ${rot}`, peso, v);
+    });
+  });
+  (w.resultados || []).forEach((r) => {
+    const textos = Object.entries(r || {}).filter(([k, v]) => typeof v === "string" && v.length < 6000 && !/^id|Id$|criado|atualizado/.test(k) && !/^[0-9a-f-]{20,}$/i.test(v)).map(([, v]) => v);
+    add("Resultado", 3, textos.join(" · "));
+  });
+  INDICE_BUSCA.set(w.id, { chave, entradas: ent });
+  return ent;
+}
+function interpretarBusca(q) {
+  const frases = [];
+  const resto = String(q).replace(/"([^"]+)"/g, (_, f) => { const n = colapsaEsp(foldAlnum(f)); if (n) frases.push(n); return " "; });
+  const termos = colapsaEsp(foldAlnum(resto)).split(" ").filter(Boolean);
+  return [...frases, ...termos];
+}
+const variantesTermo = (t) => {
+  const v = [t];
+  if (t.length > 3 && t.endsWith("s")) v.push(t.slice(0, -1));
+  else if (t.length > 3) v.push(t + "s");
+  return v;
+};
+function melhorEntrada(ent, t) {
+  let melhor = 0, entrada = null;
+  const vs = variantesTermo(t);
+  for (const en of ent) {
+    let achou = false, inicio = false;
+    for (const v of vs) {
+      const pos = en.n.indexOf(v);
+      if (pos >= 0) { achou = true; if (pos === 0 || en.n[pos - 1] === " ") inicio = true; }
+    }
+    if (achou) { const s = en.peso + (inicio ? 2 : 0); if (s > melhor) { melhor = s; entrada = en; } }
+  }
+  return { pontos: melhor, entrada };
+}
+function buscarWorkouts(lista, protocolos, q) {
+  const termos = interpretarBusca(q);
+  if (!termos.length) return null;
+  const juntos = colapsaEsp(termos.join(" "));
+  const rodar = (exigirTodos) => lista.map((w) => {
+    const ent = indexarWorkout(w, protocolos);
+    let total = 0, achados = 0;
+    const trechos = [];
+    termos.forEach((t) => {
+      const { pontos, entrada } = melhorEntrada(ent, t);
+      if (pontos > 0) {
+        achados++; total += pontos;
+        if (entrada && entrada.campo !== "Nome" && entrada.campo !== "Código" && !trechos.some((x) => x.entrada === entrada)) trechos.push({ entrada });
+      }
+    });
+    if (exigirTodos ? achados < termos.length : achados === 0) return null;
+    const nome = ent.find((e) => e.campo === "Nome");
+    if (nome && nome.n.includes(juntos)) total += 8;
+    return { w, score: total, trechos: trechos.slice(0, 3) };
+  }).filter(Boolean).sort((x, y) => y.score - x.score || String(y.w.data).localeCompare(String(x.w.data)));
+  let itens = rodar(true);
+  let parcial = false;
+  if (itens.length === 0 && termos.length > 1) { itens = rodar(false); parcial = itens.length > 0; }
+  const palavras = [...new Set(termos.join(" ").split(" ").filter((p) => p.length >= 2))];
+  return { itens, parcial, palavras };
+}
+function destacarTexto(texto, palavras) {
+  const f = foldAlnum(texto);
+  let marcas = [];
+  palavras.forEach((p) => {
+    for (const v of variantesTermo(p)) {
+      let i = f.indexOf(v);
+      while (i >= 0) { marcas.push([i, i + v.length]); i = f.indexOf(v, i + v.length); }
+    }
+  });
+  marcas.sort((x, y) => x[0] - y[0]);
+  const fund = [];
+  marcas.forEach((m) => { const u = fund[fund.length - 1]; if (u && m[0] <= u[1]) u[1] = Math.max(u[1], m[1]); else fund.push([...m]); });
+  const nos = [];
+  let cur = 0;
+  fund.forEach(([ini, fim], k) => {
+    if (ini > cur) nos.push(texto.slice(cur, ini));
+    nos.push(<mark key={k} style={{ background: "rgba(228,222,0,0.28)", color: "#FFFFFF", borderRadius: 3, padding: "0 2px" }}>{texto.slice(ini, fim)}</mark>);
+    cur = fim;
+  });
+  if (cur < texto.length) nos.push(texto.slice(cur));
+  return nos;
+}
+function TrechosBusca({ trechos, palavras }) {
+  if (!trechos || !trechos.length) return null;
+  return (
+    <div style={{ background: "#1B1C20", border: "1px solid #2E2F35", borderRadius: 10, padding: "9px 12px", margin: "-4px 0 12px" }}>
+      {trechos.map(({ entrada }, i) => {
+        const f = foldAlnum(entrada.texto);
+        let pos = -1;
+        palavras.forEach((p) => { for (const v of variantesTermo(p)) { const k = f.indexOf(v); if (k >= 0 && (pos < 0 || k < pos)) pos = k; } });
+        const ini = Math.max(0, pos - 38), fim = Math.min(entrada.texto.length, pos + 90);
+        const recorte = entrada.texto.slice(ini, fim).replace(/\s+/g, " ");
+        return (
+          <div key={i} style={{ fontSize: 12.5, color: "#C9CAD0", lineHeight: 1.5, marginTop: i ? 6 : 0 }}>
+            <b style={{ color: "#E4DE00", fontSize: 11, letterSpacing: "0.05em" }}>{entrada.campo.toUpperCase()}</b>{" "}
+            {ini > 0 && "…"}{destacarTexto(recorte, palavras)}{fim < entrada.texto.length && "…"}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const ACRONIMOS_TREINO = new Set(["abs", "ct", "amrap", "hiit", "emom", "mmii", "mmss", "mmi", "ktb", "wod", "rx", "hyrox", "amr"]);
 // Títulos digitados todo em MAIÚSCULAS ficam em formato de título (mais fácil de ler)
 function tituloLegivel(t) {
@@ -3120,7 +3256,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     setTodosCarregados(true);
     setCarregandoTodos(false);
   };
-  useEffect(() => { if (filtrosAtivos && !todosCarregados) carregarTodos(); }, [filtrosAtivos, todosCarregados]);
+  useEffect(() => { if ((filtrosAtivos || buscaAtiva) && !todosCarregados) carregarTodos(); }, [filtrosAtivos, buscaAtiva, todosCarregados]);
   const limparFiltros = () => { setSoFavoritos(false); setFiltroProtocolo(""); setFiltroNivelTreino(""); setFiltroStatus(""); };
   const mudar = (fn) => { setModoResultados(false); setExpandidoId(null); fn(); };
 
@@ -3279,8 +3415,13 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
   };
 
   const termoRes = busca.trim().toLowerCase();
-  const resultadosFiltrados = listaResultados.filter((w) =>
-    !termoRes || [w.nome, w.codigo, w.tags].filter(Boolean).join(" ").toLowerCase().includes(termoRes));
+  const buscaRes = termoRes ? buscarWorkouts(listaResultados, protocolos, busca) : null;
+  const resultadosFiltrados = buscaRes ? buscaRes.itens.map((x) => x.w) : listaResultados;
+  // Busca local em todos os campos (assim que todos os treinos estiverem carregados)
+  const buscaLocal = buscaAtiva && todosCarregados ? buscarWorkouts(todosTreinos, protocolos, busca) : null;
+  const idsBusca = buscaLocal ? new Set(buscaLocal.itens.map((x) => x.w.id)) : null;
+  const trechosPorId = {};
+  if (buscaLocal) buscaLocal.itens.forEach((x) => { trechosPorId[x.w.id] = x.trechos; });
   // Filtros combinados (todos juntos) + busca de texto, feitos no aparelho
   const temResultado = temResultadoTreino;
   const foiExecutado = (w) => (execucoesPorTreino[w.id] || []).length > 0;
@@ -3293,16 +3434,15 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
     if (filtroStatus === "com_resultado" && !temResultado(w)) return false;
     if (filtroStatus === "nao_executado" && foiExecutado(w)) return false;
     if (filtroStatus === "executado" && !foiExecutado(w)) return false;
-    if (termoRes) {
-      const prot = protocolos.find((pr) => pr.id === w.protocoloId);
-      const texto = [w.nome, w.codigo, w.tags, w.categoria, w.warmupGeral, w.warmupEspecifico, w.skill, prot && prot.titulo,
-        ...(w.blocos || []).flatMap((b) => [b.titulo, b.conteudo, b.objetivos])].filter(Boolean).join(" ").toLowerCase();
-      if (!texto.includes(termoRes)) return false;
-    }
+    if (idsBusca && !idsBusca.has(w.id)) return false;
     return true;
   };
-  const filtradosLocal = todosTreinos.filter(passaFiltros);
-  const listaBase = modoResultados ? resultadosFiltrados : (filtrosAtivos ? filtradosLocal : (buscaAtiva ? resultadosBusca : (modoTodos ? workouts : recentes)));
+  let filtradosLocal = todosTreinos.filter(passaFiltros);
+  if (buscaLocal) {
+    const ordem = new Map(buscaLocal.itens.map((x, i) => [x.w.id, i]));
+    filtradosLocal = [...filtradosLocal].sort((x, y) => ordem.get(x.id) - ordem.get(y.id));
+  }
+  const listaBase = modoResultados ? resultadosFiltrados : ((filtrosAtivos || buscaLocal) ? filtradosLocal : (buscaAtiva ? resultadosBusca : (modoTodos ? workouts : recentes)));
   const listaExibida = !modoResultados && !filtrosAtivos && !buscaAtiva && treinoDestaque
     ? [treinoDestaque, ...listaBase.filter((x) => x.id !== treinoDestaque.id)]
     : listaBase;
@@ -3339,7 +3479,7 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", left: 10, top: 12, color: "#8E8F96" }} />
         <TextInput
-          placeholder="Buscar por qualquer palavra: nome, código, tag..."
+          placeholder="Buscar em tudo: nome, exercício, bloco, tag, resultado..."
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
           style={{ paddingLeft: 32 }}
@@ -3450,9 +3590,12 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
         </div>
       )}
 
-      {!modoResultados && !filtrosAtivos && buscaAtiva && (
-        <div style={{ fontSize: 11.5, color: "#5f6066", marginBottom: 12 }}>
-          {buscando ? "Buscando..." : `${resultadosBusca.length} resultado(s) para "${busca.trim()}"`}
+      {!modoResultados && buscaAtiva && (
+        <div style={{ fontSize: 12, color: "#9A9BA2", marginBottom: 12, lineHeight: 1.5 }}>
+          {buscaLocal
+            ? <><b style={{ color: "#F1EFE9" }}>{listaBase.length}</b> treino(s) com "{busca.trim()}"{buscaLocal.parcial ? " · nenhum tem todas as palavras, mostrando os que têm ao menos uma" : ""}</>
+            : (buscando || !todosCarregados) ? "Buscando em todos os campos..." : `${resultadosBusca.length} resultado(s) para "${busca.trim()}"`}
+          {buscaLocal && !buscaLocal.parcial && busca.trim().includes(" ") && <div style={{ color: "#6F7076", fontSize: 11 }}>Várias palavras: todas precisam aparecer. Use "aspas" para uma frase exata.</div>}
         </div>
       )}
 
@@ -3464,8 +3607,9 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
             <EmptyState text={modoResultados ? "Nenhum treino com resultado registrado." : filtrosAtivos ? "Nenhum treino com esses filtros." : buscaAtiva ? "Nenhum treino encontrado para essa busca." : "Nenhum treino programado ainda. Toque em 'Novo treino'."} />
           )}
           {listaExibida.map((w) => (
+            <React.Fragment key={w.id}>
             <WorkoutCard
-              key={w.id} w={w} expandido={expandidoId === w.id}
+              w={w} expandido={expandidoId === w.id}
               onToggle={() => setExpandidoId(expandidoId === w.id ? null : w.id)}
               onEditar={abrirEdicaoTreino}
               onDuplicar={duplicarTreino}
@@ -3482,6 +3626,8 @@ function WorkoutsTab({ legendas, setLegendas, onToast, senha, bannerWorkoutId })
               senha={senha}
               protocolo={protocolos.find((pr) => pr.id === w.protocoloId) || null}
             />
+            {buscaLocal && !modoResultados && <TrechosBusca trechos={trechosPorId[w.id]} palavras={buscaLocal.palavras} />}
+            </React.Fragment>
           ))}
           {!modoResultados && !filtrosAtivos && !buscaAtiva && modoTodos && workouts.length < total && (
             <GhostButton onClick={carregarMais} style={{ width: "100%" }}>
@@ -4715,11 +4861,25 @@ function GraficoRanking({ titulo, ajuda, eventos, unidade = "itens", leitura = "
         return (
           <Sheet title={nome} onClose={() => setItemAberto(null)}>
             <div style={{ fontSize: 13, color: "#B9BABF", marginBottom: 14 }}>
-              <b style={{ color: "#E4DE00" }}>{ocorr.length}×</b> {mesAtual ? `em ${rotuloMes(mesAtual)}` : "em todos os meses"}. Abaixo estão os dias.
-              {tipo === "exercicio" ? " Se a aptidão de um dia estiver errada, corrija ali mesmo." : " Para mudar a aptidão de um exercício daquele dia, escolha a nova."}
+              <b style={{ color: "#E4DE00" }}>{tipo === "aptidao" ? `${ocorr.length} dia${ocorr.length === 1 ? "" : "s"}` : `${ocorr.length}×`}</b> {mesAtual ? `em ${rotuloMes(mesAtual)}` : "em todos os meses"}. Abaixo estão os dias.
+              {tipo === "exercicio" ? " Se a aptidão de um dia estiver errada, corrija ali mesmo." : " Cada dia conta uma vez, mesmo com vários exercícios dessa aptidão. Para mudar a aptidão de um exercício, escolha a nova."}
             </div>
             {ocorr.length === 0 && <div style={{ fontSize: 13, color: "#8E8F96" }}>Nenhuma ocorrência neste filtro.</div>}
-            {ocorr.map((o) => (
+            {tipo === "aptidao" ? ocorr.map((o) => (
+              <div key={`${o.data}-${o.progId}`} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 800, color: "#F1EFE9" }}>{diaSem(o.data)} · {o.data.slice(8, 10)}/{o.data.slice(5, 7)}/{o.data.slice(0, 4)}</span>
+                  {o.progNome && <span style={{ fontSize: 11, color: "#8E8F96", textAlign: "right" }}>{o.progNome}</span>}
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.06em", margin: "8px 0 4px" }}>EXERCÍCIOS ({(o.exercicios || []).length})</div>
+                {(o.exercicios || []).map((e, k) => (
+                  <div key={k} style={{ borderTop: k ? "1px solid #2A2B30" : "none", padding: "8px 0 2px" }}>
+                    <div style={{ fontSize: 14.5, fontWeight: 700, color: "#E6E4DE" }}>{e.nome}</div>
+                    <div style={{ marginTop: 6 }}><ObjetivoSelect valor={e.objetivo} onChange={(v) => onCorrigir && onCorrigir(e, v)} /></div>
+                  </div>
+                ))}
+              </div>
+            )) : ocorr.map((o) => (
               <div key={`${o.progId}-${o.diaIdx}-${o.exIdx}`} style={{ background: "#1C1D20", border: "1px solid #2E2F34", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 800, color: "#F1EFE9" }}>{diaSem(o.data)} · {o.data.slice(8, 10)}/{o.data.slice(5, 7)}/{o.data.slice(0, 4)}</span>
@@ -4795,7 +4955,7 @@ function GraficosProgramacao({ programacoes, biblioteca = [], senha, onProgramac
   });
   let ocultosEx = 0, ocultosAp = 0;
   const evExercicios = [];
-  const evAptidoes = [];
+  const aptBrutas = []; // uma por exercício; depois agrupamos por aptidão + dia
   ocorr.forEach((o) => {
     if (o.nome) {
       const r = aplicarAjusteGrafico(ajustes, "exercicio", o.canon);
@@ -4803,9 +4963,17 @@ function GraficosProgramacao({ programacoes, biblioteca = [], senha, onProgramac
     }
     if (o.objetivo) {
       const r = aplicarAjusteGrafico(ajustes, "aptidao", o.objetivo);
-      if (r) evAptidoes.push({ ...o, rotulo: r }); else ocultosAp++;
+      if (r) aptBrutas.push({ ...o, rotulo: r }); else ocultosAp++;
     }
   });
+  // Aptidão trabalhada no dia conta só 1 vez, mesmo com vários exercícios da mesma aptidão (ex.: 3 de força = 1)
+  const porDiaApt = new Map();
+  aptBrutas.forEach((o) => {
+    const k = `${o.data}|${normalizarTexto(o.rotulo)}`;
+    if (!porDiaApt.has(k)) porDiaApt.set(k, { ...o, exercicios: [] });
+    porDiaApt.get(k).exercicios.push({ progId: o.progId, progNome: o.progNome, diaIdx: o.diaIdx, exIdx: o.exIdx, nome: o.nome, objetivo: o.objetivo });
+  });
+  const evAptidoes = [...porDiaApt.values()];
   const leitura = `${programacoes.length - semData} de ${programacoes.length} programações lidas${semData ? ` · ${semData} sem data (fora da conta)` : ""}`;
 
   const ajustar = (tipo, original, acao, destino) => pedir(async () => {
@@ -4848,9 +5016,9 @@ function GraficosProgramacao({ programacoes, biblioteca = [], senha, onProgramac
       />
       <GraficoRanking
         titulo="APTIDÃO MAIS DESENVOLVIDA"
-        ajuda="Quantas vezes cada objetivo foi trabalhado (cardiorrespiratória, resistência, skill...)."
+        ajuda="Em quantos dias cada aptidão foi trabalhada. Vários exercícios da mesma aptidão no mesmo dia contam 1 vez só."
         eventos={evAptidoes}
-        unidade="objetivos"
+        unidade="marcações"
         leitura={leitura}
         tipo="aptidao"
         ajustes={ajustes}
