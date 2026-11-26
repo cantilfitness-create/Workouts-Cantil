@@ -4430,7 +4430,7 @@ function ObjetivoSelect({ valor, onChange }) {
 }
 
 // Campo "digite e escolha": busca na biblioteca de exercícios, ou usa o texto digitado
-function AdicionarExercicio({ biblioteca, onAdd }) {
+function AdicionarExercicio({ biblioteca, onAdd, placeholder = "+ Adicionar exercício (digite para buscar)" }) {
   const [texto, setTexto] = useState("");
   const termo = texto.trim().toLowerCase();
   const sugestoes = termo ? biblioteca.filter((e) => variantesDe(e).some((v) => v.toLowerCase().includes(termo))).slice(0, 6) : [];
@@ -4451,8 +4451,17 @@ function AdicionarExercicio({ biblioteca, onAdd }) {
       <TextInput
         value={texto}
         onChange={(e) => setTexto(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); adicionar(sugestoes[0] ? sugestoes[0].nome : texto); } }}
-        placeholder="+ Adicionar exercício (digite para buscar)"
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          // vírgula, ponto e vírgula ou quebra de linha: adiciona vários de uma vez, todos na mesma aptidão
+          if (/[,;\n]/.test(texto)) {
+            const partes = texto.split(/[,;\n]+/).map((p) => p.trim()).filter(Boolean);
+            partes.forEach((p) => onAdd(p));
+            setTexto("");
+          } else adicionar(sugestoes[0] ? sugestoes[0].nome : texto);
+        }}
+        placeholder={placeholder}
         enterKeyHint="done"
       />
       {termo && (
@@ -4483,6 +4492,9 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
 
   const [expandidos, setExpandidos] = useState({}); // dias com a aba "anteriores" aberta
   const [previsaoAberta, setPrevisaoAberta] = useState({}); // dias com a lista de aptidões aberta
+  const [gruposNovos, setGruposNovos] = useState({}); // aptidões escolhidas no dia que ainda não têm exercício
+  const [aptMenu, setAptMenu] = useState({}); // dias com o menu "+ Adicionar aptidão" aberto
+  const [movendo, setMovendo] = useState({}); // exercício que está trocando de aptidão
   const alternarPrevisao = (idx, apt) => setForm({
     ...form,
     dias: form.dias.map((d, i) => {
@@ -4498,7 +4510,22 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
   const definirLista = (idx, lista) => {
     setForm({ ...form, dias: form.dias.map((d, i) => (i === idx ? { ...d, exercicios: lista } : d)) });
   };
-  const adicionar = (idx, nome) => definirLista(idx, [...exerciciosDoDia(form.dias[idx]), { nome, objetivo: objetivoSugerido(nome) }]);
+  // atualização funcional: adicionar vários exercícios seguidos não perde nenhum
+  const adicionar = (idx, nome, objetivo) => {
+    setForm((prev) => ({ ...prev, dias: prev.dias.map((d, i) => (i !== idx ? d : { ...d, exercicios: [...exerciciosDoDia(d), { nome, objetivo: objetivo ?? objetivoSugerido(nome) }] })) }));
+    if (objetivo) setGruposNovos((p) => ({ ...p, [form.dias[idx].dia]: (p[form.dias[idx].dia] || []).filter((x) => normalizarTexto(x) !== normalizarTexto(objetivo)) }));
+  };
+  const trocarAptidaoGrupo = (idx, g, nova) => {
+    const dia = form.dias[idx].dia;
+    if (g.novo) { setGruposNovos((p) => ({ ...p, [dia]: (p[dia] || []).map((x) => (normalizarTexto(x) === normalizarTexto(g.apt) ? nova : x)) })); return; }
+    setForm((prev) => ({ ...prev, dias: prev.dias.map((d, i) => (i !== idx ? d : { ...d, exercicios: exerciciosDoDia(d).map((e) => (normalizarTexto(e.objetivo) === normalizarTexto(g.apt) ? { ...e, objetivo: nova } : e)) })) }));
+  };
+  const criarGrupo = (idx, apt) => {
+    const dia = form.dias[idx].dia;
+    setGruposNovos((p) => ((p[dia] || []).some((x) => normalizarTexto(x) === normalizarTexto(apt)) ? p : { ...p, [dia]: [...(p[dia] || []), apt] }));
+    setAptMenu((m) => ({ ...m, [dia]: false }));
+  };
+
   const alterar = (idx, j, campo, valor) => definirLista(idx, exerciciosDoDia(form.dias[idx]).map((e, k) => (k === j ? { ...e, [campo]: valor } : e)));
   const remover = (idx, j) => definirLista(idx, exerciciosDoDia(form.dias[idx]).filter((_, k) => k !== j));
 
@@ -4528,44 +4555,75 @@ function ProgramacaoForm({ inicial, biblioteca, objetivoSugerido, onSalvar, onCa
               <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 13, color: "#E4DE00", letterSpacing: "0.06em", textTransform: "uppercase" }}>{NOMES_DIA[d.dia]}</span>
               {lista.length > 0 && <span style={{ fontSize: 11, color: "#8E8F96" }}>{lista.length} exercício{lista.length > 1 ? "s" : ""}</span>}
             </div>
-            {lista.length > LIMITE_VISIVEL && (
-              <button
-                onClick={() => setExpandidos({ ...expandidos, [d.dia]: !aberto })}
-                style={{
-                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, textAlign: "left",
-                  background: "#212226", border: "1px dashed #3A3B40", borderRadius: 8, padding: "9px 10px", marginBottom: 6, cursor: "pointer",
-                }}
-              >
-                <span style={{ minWidth: 0 }}>
-                  <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#E4DE00" }}>
-                    {aberto ? "Recolher anteriores" : `${ocultos} exercício${ocultos > 1 ? "s" : ""} anterior${ocultos > 1 ? "es" : ""}`}
-                  </span>
-                  {!aberto && (
-                    <span style={{ display: "block", fontSize: 11, color: "#8E8F96", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {lista.slice(0, ocultos).map((x) => x.nome).join(", ")}
-                    </span>
+            {(() => {
+              // Aptidão primeiro, exercícios dentro dela (os exercícios continuam salvos com a aptidão de cada um)
+              const mapa = new Map();
+              lista.forEach((e, j) => {
+                const k = normalizarTexto(e.objetivo);
+                if (!mapa.has(k)) mapa.set(k, { apt: (e.objetivo || "").trim(), itens: [] });
+                mapa.get(k).itens.push({ e, j });
+              });
+              const grupos = [...mapa.values()];
+              (gruposNovos[d.dia] || []).forEach((apt) => { if (!mapa.has(normalizarTexto(apt))) grupos.push({ apt, itens: [], novo: true }); });
+              const presentes = new Set(grupos.map((g) => normalizarTexto(g.apt)));
+              const menuAberto = !!aptMenu[d.dia];
+              return (
+                <>
+                  {grupos.map((g) => (
+                    <div key={normalizarTexto(g.apt) || "sem-aptidao"} style={{ background: "#212226", border: "1px solid #34353B", borderLeft: "4px solid #E4DE00", borderRadius: 10, padding: "10px 10px 8px", marginBottom: 8 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 800, color: "#E4DE00", letterSpacing: "0.08em", marginBottom: 6 }}>
+                        APTIDÃO DESENVOLVIDA{g.itens.length > 0 && <span style={{ color: "#8E8F96" }}> · {g.itens.length} exercício{g.itens.length > 1 ? "s" : ""}</span>}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <ObjetivoSelect valor={g.apt} onChange={(v) => trocarAptidaoGrupo(i, g, v)} />
+                        </div>
+                        {g.novo && <X size={18} color="#8E8F96" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => setGruposNovos((p) => ({ ...p, [d.dia]: (p[d.dia] || []).filter((x) => normalizarTexto(x) !== normalizarTexto(g.apt)) }))} />}
+                      </div>
+                      {g.itens.map(({ e, j }) => {
+                        const chave = `${d.dia}-${j}`;
+                        return (
+                          <div key={j} style={{ padding: "8px 2px 4px", borderTop: "1px solid #2A2B30", marginTop: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 14, fontWeight: 700, color: "#F1EFE9" }}>{e.nome}</div>
+                                {nomesBib.size > 0 && !nomesBib.has(normalizarTexto(e.nome)) && (
+                                  <div style={{ fontSize: 10.5, color: "#FF8A3D", marginTop: 2 }}>fora da biblioteca · vai para a lista de cadastro</div>
+                                )}
+                              </div>
+                              <button type="button" onClick={() => setMovendo({ ...movendo, [chave]: !movendo[chave] })} style={{ background: "none", border: "none", color: "#8E8F96", fontSize: 11.5, textDecoration: "underline", cursor: "pointer", padding: 2 }}>mover</button>
+                              <X size={17} color="#8E8F96" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => remover(i, j)} />
+                            </div>
+                            {movendo[chave] && (
+                              <div style={{ marginTop: 6 }}>
+                                <div style={{ fontSize: 11, color: "#8E8F96", marginBottom: 4 }}>Passar este exercício para a aptidão:</div>
+                                <ObjetivoSelect valor={e.objetivo} onChange={(v) => { alterar(i, j, "objetivo", v); setMovendo({ ...movendo, [chave]: false }); }} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <AdicionarExercicio
+                        biblioteca={biblioteca}
+                        placeholder="+ Exercícios desta aptidão (use vírgula para vários)"
+                        onAdd={(nome) => adicionar(i, nome, g.apt || "")}
+                      />
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setAptMenu({ ...aptMenu, [d.dia]: !menuAberto })} style={{ width: "100%", cursor: "pointer", background: "none", border: "1px dashed #E4DE0088", color: "#E4DE00", borderRadius: 10, padding: "10px 12px", fontSize: 13.5, fontWeight: 800 }}>
+                    {menuAberto ? "Fechar" : grupos.length ? "+ Adicionar outra aptidão" : "+ Escolher a aptidão do dia"}
+                  </button>
+                  {menuAberto && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                      {APTIDOES.filter((x) => !presentes.has(normalizarTexto(x))).map((apt) => (
+                        <button type="button" key={apt} onClick={() => criarGrupo(i, apt)} style={{ cursor: "pointer", borderRadius: 999, padding: "7px 12px", fontSize: 13, fontWeight: 600, background: "#212226", color: "#E6E4DE", border: "1px solid #3A3B40" }}>{apt}</button>
+                      ))}
+                      <button type="button" onClick={() => { const t = window.prompt("Nome da aptidão:"); if (t && t.trim()) criarGrupo(i, t.trim()); }} style={{ cursor: "pointer", borderRadius: 999, padding: "7px 12px", fontSize: 13, fontWeight: 600, background: "none", color: "#B9BABF", border: "1px dashed #3A3B40" }}>✎ Outra…</button>
+                    </div>
                   )}
-                </span>
-                {aberto ? <ChevronUp size={16} color="#8E8F96" /> : <ChevronDown size={16} color="#8E8F96" />}
-              </button>
-            )}
-            {lista.map((e, j) => (j < ocultos ? null : (
-              <div key={j} style={{ background: "#212226", border: "1px solid #2E2F34", borderRadius: 8, padding: "8px 10px", marginBottom: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F1EFE9" }}>{e.nome}</div>
-                    {nomesBib.size > 0 && !nomesBib.has(normalizarTexto(e.nome)) && (
-                      <div style={{ fontSize: 10.5, color: "#FF8A3D", marginTop: 2 }}>fora da biblioteca · vai para a lista de cadastro</div>
-                    )}
-                  </div>
-                  <X size={17} color="#8E8F96" style={{ cursor: "pointer", flexShrink: 0 }} onClick={() => remover(i, j)} />
-                </div>
-                <div style={{ marginTop: 6 }}>
-                  <ObjetivoSelect valor={e.objetivo} onChange={(v) => alterar(i, j, "objetivo", v)} />
-                </div>
-              </div>
-            )))}
-            <AdicionarExercicio biblioteca={biblioteca} onAdd={(nome) => adicionar(i, nome)} />
+                </>
+              );
+            })()}
 
             {/* Previsão de aptidão do dia (planejamento: não conta nos gráficos) */}
             {(() => {
